@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>荐股看板</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --line: #262b36; --txt: #e6e9ef;
+    --dim: #8a93a6; --green: #2ecc71; --red: #ff5c5c; --accent: #4c8dff;
+    --chip: #222836;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--txt);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  header { padding: 14px 16px 8px; border-bottom: 1px solid var(--line); }
+  h1 { font-size: 17px; margin: 0 0 4px; }
+  #status { color: var(--dim); font-size: 12px; }
+  #error {
+    display: none; margin: 16px; padding: 14px 16px; border-radius: 10px;
+    background: #2a1416; border: 1px solid #5a2327; color: #ffd7d7;
+  }
+  #error button {
+    margin-top: 10px; background: var(--accent); color: #fff; border: 0;
+    padding: 8px 14px; border-radius: 8px; font-size: 13px; cursor: pointer;
+  }
+  #controls {
+    display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+    padding: 10px 16px; position: sticky; top: 0; background: var(--bg);
+    border-bottom: 1px solid var(--line); z-index: 5;
+  }
+  #controls select, #controls input {
+    background: var(--panel); color: var(--txt); border: 1px solid var(--line);
+    border-radius: 8px; padding: 7px 10px; font-size: 13px; outline: none;
+  }
+  #controls input { flex: 1; min-width: 120px; }
+  .count { color: var(--dim); font-size: 12px; }
+  .wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table { border-collapse: collapse; width: 100%; min-width: 860px; }
+  th, td { padding: 9px 10px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; vertical-align: top; }
+  th { color: var(--dim); font-weight: 600; font-size: 12px; cursor: pointer; user-select: none; position: sticky; top: 53px; background: var(--bg); }
+  th .arrow { color: var(--accent); }
+  td.num { font-variant-numeric: tabular-nums; }
+  .tk { font-weight: 700; }
+  .nm { color: var(--dim); font-size: 11px; white-space: normal; max-width: 180px; display: block; }
+  .reason { white-space: normal; max-width: 320px; color: #c7cedd; font-size: 12px; }
+  .pos { color: var(--green); } .neg { color: var(--red); }
+  .chip { display: inline-block; padding: 1px 7px; border-radius: 999px; background: var(--chip); font-size: 11px; color: var(--txt); }
+  .zone-in { color: var(--green); font-weight: 600; }
+  .zone-below { color: var(--red); font-weight: 600; }
+  .zone-above { color: var(--dim); }
+  .live-dot { color: var(--accent); font-size: 10px; } /* 实时推算的买区 */
+  /* 动态更新 */
+  #updates { padding: 8px 16px 40px; }
+  #updates h2 { font-size: 14px; color: var(--dim); margin: 16px 0 8px; }
+  .upd { display: flex; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line); align-items: baseline; }
+  .upd .d { color: var(--dim); font-size: 11px; min-width: 74px; }
+  .upd .t { flex: 1; }
+  .upd a { color: var(--accent); text-decoration: none; }
+  .badge { display: inline-block; padding: 1px 7px; border-radius: 6px; font-size: 11px; margin-right: 6px; }
+  .b-new_rec { background: #15324d; color: #8cc6ff; }
+  .b-buy_alert { background: #14402a; color: #7ff0b0; }
+  .b-milestone { background: #3a2f12; color: #f0d27f; }
+  .b-falsification { background: #4a1620; color: #ff9aa8; }
+  .b-dev_news { background: #232a38; color: #aab6cc; }
+  @media (max-width: 560px) {
+    body { font-size: 13px; }
+    th { top: 49px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>荐股看板</h1>
+  <div id="status">加载中…</div>
+</header>
+
+<div id="error"></div>
+
+<div id="controls" style="display:none">
+  <select id="typeFilter"><option value="">全部类型</option></select>
+  <input id="search" type="search" placeholder="搜索代码 / 公司 / 理由">
+  <span class="count" id="count"></span>
+</div>
+
+<div class="wrap"><table id="tbl" style="display:none">
+  <thead><tr id="head"></tr></thead>
+  <tbody id="body"></tbody>
+</table></div>
+
+<div id="updates" style="display:none">
+  <h2>动态更新</h2>
+  <div id="feed"></div>
+</div>
+
+<script>
+"use strict";
+
+// ---------- 工具 ----------
+function $(id){ return document.getElementById(id); }
+function showError(msg, withRetry){
+  var e = $("error");
+  e.textContent = msg;
+  if (withRetry){
+    var b = document.createElement("button");
+    b.textContent = "重新输入口令";
+    b.onclick = function(){ sessionStorage.removeItem("dash_pp"); location.reload(); };
+    e.appendChild(document.createElement("br"));
+    e.appendChild(b);
+  }
+  e.style.display = "block";
+}
+function b64ToBytes(b64){
+  var bin = atob(b64), u = new Uint8Array(bin.length);
+  for (var i=0;i<bin.length;i++) u[i] = bin.charCodeAt(i);
+  return u;
+}
+function fmtPct(x){
+  if (x === null || x === undefined || isNaN(x)) return "—";
+  var v = x*100, s = (v>=0?"+":"") + v.toFixed(1) + "%";
+  return s;
+}
+function fmtMoney(x){
+  if (x === null || x === undefined || isNaN(x)) return "—";
+  return "$" + Number(x).toFixed(2);
+}
+function pctClass(x){ return (x>=0) ? "pos" : "neg"; }
+
+// ---------- 解密 ----------
+async function deriveKey(passphrase, salt, iterations){
+  var enc = new TextEncoder();
+  var km = await crypto.subtle.importKey("raw", enc.encode(passphrase), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey(
+    { name:"PBKDF2", salt: salt, iterations: iterations, hash:"SHA-256" },
+    km,
+    { name:"AES-GCM", length:256 },
+    false, ["decrypt"]
+  );
+}
+async function decryptEnvelope(env, passphrase){
+  var salt = b64ToBytes(env.kdf.salt);
+  var iv = b64ToBytes(env.iv);
+  var ct = b64ToBytes(env.ct);
+  var key = await deriveKey(passphrase, salt, env.kdf.iterations || 250000);
+  var pt = await crypto.subtle.decrypt({ name:"AES-GCM", iv: iv }, key, ct);
+  return new TextDecoder().decode(pt);
+}
+
+// ---------- 表格 ----------
+var STOCKS = [], sortKey = "depth", sortDir = -1;
+
+var COLS = [
+  { key:"ticker", label:"代码 / 公司", sort:function(s){return s.ticker||"";},
+    cell:function(s,td){
+      var a = document.createElement("span"); a.className="tk"; a.textContent = s.ticker||"—"; td.appendChild(a);
+      if (s.name){ var n=document.createElement("span"); n.className="nm"; n.textContent=s.name; td.appendChild(n); }
+    }},
+  { key:"type", label:"类型", sort:function(s){return s.type||"";},
+    cell:function(s,td){ var c=document.createElement("span"); c.className="chip"; c.textContent=s.type||"—"; td.appendChild(c); }},
+  { key:"depth", label:"Depth", num:true, sort:function(s){return s.depth;},
+    cell:function(s,td){ td.classList.add("num"); td.textContent = (s.depth==null?"—":s.depth); }},
+  { key:"rec_date", label:"推荐日", sort:function(s){return s.rec_date||"";},
+    cell:function(s,td){ td.textContent = s.rec_date||"—"; }},
+  { key:"chg_vs_rec", label:"推荐价 → 现价", num:true, sort:function(s){return s.chg_vs_rec;},
+    cell:function(s,td){
+      td.classList.add("num");
+      var base = document.createTextNode(fmtMoney(s.rec_price)+" → "+fmtMoney(s.last_price)+" ");
+      td.appendChild(base);
+      if (s.chg_vs_rec!=null){ var c=document.createElement("span"); c.className=pctClass(s.chg_vs_rec); c.textContent="("+fmtPct(s.chg_vs_rec)+")"; td.appendChild(c); }
+    }},
+  { key:"upside", label:"目标价 (上行)", num:true, sort:function(s){return s.upside;},
+    cell:function(s,td){
+      td.classList.add("num");
+      td.appendChild(document.createTextNode(fmtMoney(s.target)+" "));
+      if (s.upside!=null){ var c=document.createElement("span"); c.className=pctClass(s.upside); c.textContent="("+fmtPct(s.upside)+")"; td.appendChild(c); }
+    }},
+  { key:"fwd_pe", label:"估值 PE/PEG", num:true, sort:function(s){return s.fwd_pe;},
+    cell:function(s,td){ td.classList.add("num"); td.textContent = (s.fwd_pe==null?"—":s.fwd_pe) + " / " + (s.peg==null?"—":s.peg); }},
+  { key:"growth", label:"增长预期", sort:function(s){return s.growth||"";},
+    cell:function(s,td){ td.textContent = s.growth||"—"; }},
+  { key:"buy_zone", label:"建议买区 (状态)", sort:function(s){return (s.buy_zone&&s.buy_zone.status)||"";},
+    cell:function(s,td){
+      var z = s.buy_zone||{};
+      if (z.low==null){ td.textContent="—"; return; }
+      td.appendChild(document.createTextNode("$"+z.low+"–$"+z.high+" "));
+      if (z.status){
+        var cls = z.status.indexOf("在买区")>=0 ? "zone-in" : (z.status.indexOf("跌破")>=0 ? "zone-below" : "zone-above");
+        var st = document.createElement("span"); st.className=cls; st.textContent="("+z.status+")"; td.appendChild(st);
+      }
+      if (z.live){ var d=document.createElement("span"); d.className="live-dot"; d.textContent=" ●"; d.title="按现价实时推算（非推荐时锁定）"; td.appendChild(d); }
+      if (s.rsi14!=null){ var r=document.createElement("span"); r.className="nm"; r.textContent="RSI "+s.rsi14; td.appendChild(r); }
+    }},
+  { key:"reason", label:"看好原因", sort:function(s){return s.reason||"";},
+    cell:function(s,td){ td.className="reason"; td.textContent = s.reason||"—"; }},
+];
+
+function buildHead(){
+  var tr = $("head");
+  tr.textContent = "";
+  COLS.forEach(function(col){
+    var th = document.createElement("th");
+    th.textContent = col.label;
+    if (col.key === sortKey){
+      var ar = document.createElement("span"); ar.className="arrow"; ar.textContent = sortDir<0 ? " ↓" : " ↑";
+      th.appendChild(ar);
+    }
+    th.onclick = function(){
+      if (sortKey === col.key){ sortDir = -sortDir; }
+      else { sortKey = col.key; sortDir = col.num ? -1 : 1; }
+      buildHead(); renderBody();
+    };
+    tr.appendChild(th);
+  });
+}
+
+function currentRows(){
+  var t = $("typeFilter").value;
+  var q = ($("search").value||"").trim().toLowerCase();
+  var col = COLS.filter(function(c){return c.key===sortKey;})[0] || COLS[0];
+  var rows = STOCKS.filter(function(s){
+    if (t && s.type !== t) return false;
+    if (q){
+      var hay = ((s.ticker||"")+" "+(s.name||"")+" "+(s.reason||"")).toLowerCase();
+      if (hay.indexOf(q) < 0) return false;
+    }
+    return true;
+  });
+  rows.sort(function(a,b){
+    var va = col.sort(a), vb = col.sort(b);
+    var na = (va===null||va===undefined||va===""), nb = (vb===null||vb===undefined||vb==="");
+    if (na && nb) return 0;
+    if (na) return 1;       // null 永远排后
+    if (nb) return -1;
+    if (va < vb) return -1*sortDir;
+    if (va > vb) return 1*sortDir;
+    return 0;
+  });
+  return rows;
+}
+
+function renderBody(){
+  var rows = currentRows();
+  var body = $("body");
+  body.textContent = "";
+  rows.forEach(function(s){
+    var tr = document.createElement("tr");
+    COLS.forEach(function(col){
+      var td = document.createElement("td");
+      try { col.cell(s, td); } catch(e){ td.textContent = "—"; }
+      tr.appendChild(td);
+    });
+    body.appendChild(tr);
+  });
+  $("count").textContent = rows.length + " / " + STOCKS.length + " 只";
+}
+
+function renderUpdates(updates){
+  var feed = $("feed");
+  feed.textContent = "";
+  var labels = { new_rec:"新荐", buy_alert:"买点", milestone:"里程碑", falsification:"证伪", dev_news:"动态" };
+  (updates||[]).forEach(function(u){
+    var row = document.createElement("div"); row.className="upd";
+    var d = document.createElement("span"); d.className="d"; d.textContent = u.date||""; row.appendChild(d);
+    var t = document.createElement("span"); t.className="t";
+    var badge = document.createElement("span"); badge.className = "badge b-"+(u.type||"dev_news");
+    badge.textContent = labels[u.type] || "动态"; t.appendChild(badge);
+    if (u.ticker){ var tk=document.createElement("span"); tk.className="tk"; tk.textContent=u.ticker+" "; t.appendChild(tk); }
+    if (u.url){
+      var a = document.createElement("a"); a.href = u.url; a.target="_blank"; a.rel="noopener noreferrer";
+      a.textContent = u.text||""; t.appendChild(a);
+    } else {
+      t.appendChild(document.createTextNode(u.text||""));
+    }
+    row.appendChild(t);
+    feed.appendChild(row);
+  });
+}
+
+function render(data){
+  var meta = data.meta || {};
+  var bits = [];
+  if (meta.data_as_of) bits.push("数据截至 " + meta.data_as_of);
+  if (meta.last_updated) bits.push("更新于 " + meta.last_updated);
+  if (meta.spy) bits.push("SPY $" + meta.spy);
+  $("status").textContent = bits.join(" · ") || "已加载";
+
+  STOCKS = Array.isArray(data.stocks) ? data.stocks : [];
+  // 类型下拉
+  var types = {}; STOCKS.forEach(function(s){ if (s.type) types[s.type]=1; });
+  var sel = $("typeFilter");
+  Object.keys(types).sort().forEach(function(tp){
+    var o = document.createElement("option"); o.value=tp; o.textContent=tp; sel.appendChild(o);
+  });
+  sel.onchange = renderBody;
+  $("search").oninput = renderBody;
+
+  buildHead(); renderBody();
+  renderUpdates(data.updates);
+
+  $("controls").style.display = "flex";
+  $("tbl").style.display = "";
+  $("updates").style.display = "";
+}
+
+// ---------- 引导 ----------
+async function boot(){
+  if (!window.crypto || !crypto.subtle){
+    showError("此浏览器不支持 WebCrypto，无法解密。请用现代浏览器（需 HTTPS）。", false);
+    return;
+  }
+  var pp = sessionStorage.getItem("dash_pp");
+  if (!pp){
+    pp = window.prompt("请输入看板口令");
+    if (!pp){ showError("未输入口令。", true); return; }
+    sessionStorage.setItem("dash_pp", pp);
+  }
+
+  var env;
+  try {
+    var resp = await fetch("data.enc.json?v=" + Date.now(), { cache:"no-store" });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    env = await resp.json();
+  } catch(e){
+    showError("数据加载失败：" + e.message + "（请稍后硬刷新 Ctrl+Shift+R）", false);
+    return;
+  }
+
+  var text;
+  try {
+    text = await decryptEnvelope(env, pp);
+  } catch(e){
+    showError("解密失败，请检查口令是否正确。", true);
+    return;
+  }
+
+  var data;
+  try {
+    data = JSON.parse(text);
+  } catch(e){
+    showError("数据解析失败（JSON 格式异常）：" + e.message, false);
+    return;
+  }
+
+  try {
+    render(data);
+  } catch(e){
+    showError("渲染失败：" + e.message, false);
+  }
+}
+
+boot();
+</script>
+</body>
+</html>
