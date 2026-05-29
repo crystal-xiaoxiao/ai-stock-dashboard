@@ -39,11 +39,13 @@
   }
   #controls input { flex: 1; min-width: 120px; }
   .count { color: var(--dim); font-size: 12px; }
-  .wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-  /* table-layout:fixed + 列宽百分比 => 整表永远适配视口宽度，内容换行，不再横向滚动 */
-  table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+  /* fixed 布局已保证整表适配视口宽度，无需横向滚动容器；
+     去掉 overflow 容器，粘性表头才能相对视口正确吸顶（否则会被滚动容器吞掉）。 */
+  .wrap { overflow: visible; }
+  /* border-collapse:separate 修复粘性 <th> 在 Chrome/Safari 不绘制（表头“消失”）的已知 bug */
+  table { border-collapse: separate; border-spacing: 0; width: 100%; table-layout: fixed; }
   th, td { padding: 6px 6px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; white-space: normal; overflow-wrap: break-word; word-break: break-word; }
-  th { color: var(--dim); font-weight: 600; font-size: 11px; line-height: 1.25; cursor: pointer; user-select: none; position: sticky; top: 53px; background: var(--bg); }
+  th { color: var(--dim); font-weight: 600; font-size: 11px; line-height: 1.25; cursor: pointer; user-select: none; position: sticky; top: var(--head-top, 53px); z-index: 2; background: var(--bg); }
   th .arrow { color: var(--accent); }
   td { font-size: 12px; }
   td.num { font-variant-numeric: tabular-nums; }
@@ -71,7 +73,6 @@
   .b-dev_news { background: #232a38; color: #aab6cc; }
   @media (max-width: 560px) {
     body { font-size: 13px; }
-    th { top: 49px; }
   }
 </style>
 </head>
@@ -104,6 +105,12 @@
 
 // ---------- 工具 ----------
 function $(id){ return document.getElementById(id); }
+// 让粘性表头精确吸在 controls 栏下沿（controls 在窄屏会换行变高，故按实测高度算）
+function syncHeadTop(){
+  var c = $("controls");
+  var h = (c && c.offsetHeight) ? c.offsetHeight : 53;
+  document.documentElement.style.setProperty("--head-top", h + "px");
+}
 function showError(msg, withRetry){
   var e = $("error");
   e.textContent = msg;
@@ -314,10 +321,12 @@ function render(data){
   $("controls").style.display = "flex";
   $("tbl").style.display = "";
   $("updates").style.display = "";
+  syncHeadTop();
 }
 
 // ---------- 引导 ----------
 async function boot(){
+  window.addEventListener("resize", syncHeadTop);
   if (!window.crypto || !crypto.subtle){
     showError("此浏览器不支持 WebCrypto，无法解密。请用现代浏览器（需 HTTPS）。", false);
     return;
