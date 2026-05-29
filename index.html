@@ -40,14 +40,16 @@
   #controls input { flex: 1; min-width: 120px; }
   .count { color: var(--dim); font-size: 12px; }
   .wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-  table { border-collapse: collapse; width: 100%; min-width: 860px; }
-  th, td { padding: 9px 10px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; vertical-align: top; }
-  th { color: var(--dim); font-weight: 600; font-size: 12px; cursor: pointer; user-select: none; position: sticky; top: 53px; background: var(--bg); }
+  /* table-layout:fixed + 列宽百分比 => 整表永远适配视口宽度，内容换行，不再横向滚动 */
+  table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+  th, td { padding: 6px 6px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; white-space: normal; overflow-wrap: break-word; word-break: break-word; }
+  th { color: var(--dim); font-weight: 600; font-size: 11px; line-height: 1.25; cursor: pointer; user-select: none; position: sticky; top: 53px; background: var(--bg); }
   th .arrow { color: var(--accent); }
+  td { font-size: 12px; }
   td.num { font-variant-numeric: tabular-nums; }
   .tk { font-weight: 700; }
-  .nm { color: var(--dim); font-size: 11px; white-space: normal; max-width: 180px; display: block; }
-  .reason { white-space: normal; max-width: 320px; color: #c7cedd; font-size: 12px; }
+  .nm { color: var(--dim); font-size: 10px; display: block; margin-top: 2px; }
+  .reason { color: #c7cedd; font-size: 11px; }
   .pos { color: var(--green); } .neg { color: var(--red); }
   .chip { display: inline-block; padding: 1px 7px; border-radius: 999px; background: var(--chip); font-size: 11px; color: var(--txt); }
   .zone-in { color: var(--green); font-weight: 600; }
@@ -151,50 +153,57 @@ async function decryptEnvelope(env, passphrase){
 }
 
 // ---------- 表格 ----------
-var STOCKS = [], sortKey = "depth", sortDir = -1;
+// 默认：买区状态排序（在买区置顶，组内 Depth 高者优先）
+var STOCKS = [], sortKey = "buy_zone", sortDir = 1;
+
+function zoneRank(s){
+  var st = (s.buy_zone && s.buy_zone.status) || "";
+  return st.indexOf("在买区")>=0 ? 0 : (st.indexOf("跌破")>=0 ? 1 : (st ? 2 : 3));
+}
 
 var COLS = [
-  { key:"ticker", label:"代码 / 公司", sort:function(s){return s.ticker||"";},
+  { key:"ticker", label:"代码/公司", w:"10%", sort:function(s){return s.ticker||"";},
     cell:function(s,td){
       var a = document.createElement("span"); a.className="tk"; a.textContent = s.ticker||"—"; td.appendChild(a);
       if (s.name){ var n=document.createElement("span"); n.className="nm"; n.textContent=s.name; td.appendChild(n); }
     }},
-  { key:"type", label:"类型", sort:function(s){return s.type||"";},
+  { key:"type", label:"类型", w:"7%", sort:function(s){return s.type||"";},
     cell:function(s,td){ var c=document.createElement("span"); c.className="chip"; c.textContent=s.type||"—"; td.appendChild(c); }},
-  { key:"depth", label:"Depth", num:true, sort:function(s){return s.depth;},
+  { key:"depth", label:"Depth", w:"6%", num:true, sort:function(s){return s.depth;},
     cell:function(s,td){ td.classList.add("num"); td.textContent = (s.depth==null?"—":s.depth); }},
-  { key:"rec_date", label:"推荐日", sort:function(s){return s.rec_date||"";},
+  { key:"rec_date", label:"推荐日", w:"8%", sort:function(s){return s.rec_date||"";},
     cell:function(s,td){ td.textContent = s.rec_date||"—"; }},
-  { key:"chg_vs_rec", label:"推荐价 → 现价", num:true, sort:function(s){return s.chg_vs_rec;},
+  { key:"chg_vs_rec", label:"现价 (较荐)", w:"11%", num:true, sort:function(s){return s.chg_vs_rec;},
     cell:function(s,td){
       td.classList.add("num");
-      var base = document.createTextNode(fmtMoney(s.rec_price)+" → "+fmtMoney(s.last_price)+" ");
-      td.appendChild(base);
-      if (s.chg_vs_rec!=null){ var c=document.createElement("span"); c.className=pctClass(s.chg_vs_rec); c.textContent="("+fmtPct(s.chg_vs_rec)+")"; td.appendChild(c); }
+      td.appendChild(document.createTextNode(fmtMoney(s.last_price)));
+      if (s.chg_vs_rec!=null){ var c=document.createElement("span"); c.className=pctClass(s.chg_vs_rec); c.textContent=" "+fmtPct(s.chg_vs_rec); td.appendChild(c); }
+      var sub=document.createElement("span"); sub.className="nm"; sub.textContent="荐 "+fmtMoney(s.rec_price); td.appendChild(sub);
     }},
-  { key:"upside", label:"目标价 (上行)", num:true, sort:function(s){return s.upside;},
+  { key:"upside", label:"目标 (上行)", w:"10%", num:true, sort:function(s){return s.upside;},
     cell:function(s,td){
       td.classList.add("num");
-      td.appendChild(document.createTextNode(fmtMoney(s.target)+" "));
-      if (s.upside!=null){ var c=document.createElement("span"); c.className=pctClass(s.upside); c.textContent="("+fmtPct(s.upside)+")"; td.appendChild(c); }
+      td.appendChild(document.createTextNode(fmtMoney(s.target)));
+      if (s.upside!=null){ var c=document.createElement("span"); c.className=pctClass(s.upside); c.textContent=" "+fmtPct(s.upside); td.appendChild(c); }
     }},
-  { key:"fwd_pe", label:"估值 PE/PEG", num:true, sort:function(s){return s.fwd_pe;},
+  { key:"fwd_pe", label:"PE/PEG", w:"7%", num:true, sort:function(s){return s.fwd_pe;},
     cell:function(s,td){ td.classList.add("num"); td.textContent = (s.fwd_pe==null?"—":s.fwd_pe) + " / " + (s.peg==null?"—":s.peg); }},
-  { key:"growth", label:"增长预期", sort:function(s){return s.growth||"";},
+  { key:"growth", label:"增长预期", w:"12%", sort:function(s){return s.growth||"";},
     cell:function(s,td){ td.textContent = s.growth||"—"; }},
-  { key:"buy_zone", label:"建议买区 (状态)", sort:function(s){return (s.buy_zone&&s.buy_zone.status)||"";},
+  { key:"buy_zone", label:"买区 (状态)", w:"14%", sort:function(s){return zoneRank(s)*100 - (s.depth==null?0:s.depth);},
     cell:function(s,td){
       var z = s.buy_zone||{};
       if (z.low==null){ td.textContent="—"; return; }
-      td.appendChild(document.createTextNode("$"+z.low+"–$"+z.high+" "));
+      td.appendChild(document.createTextNode("$"+z.low+"–$"+z.high));
       if (z.status){
         var cls = z.status.indexOf("在买区")>=0 ? "zone-in" : (z.status.indexOf("跌破")>=0 ? "zone-below" : "zone-above");
-        var st = document.createElement("span"); st.className=cls; st.textContent="("+z.status+")"; td.appendChild(st);
+        var st = document.createElement("span"); st.className=cls; st.style.display="block"; st.textContent=z.status;
+        if (z.live){ var d=document.createElement("span"); d.className="live-dot"; d.textContent=" ●"; d.title="按现价实时推算（非推荐时锁定）"; st.appendChild(d); }
+        td.appendChild(st);
       }
-      if (z.live){ var d=document.createElement("span"); d.className="live-dot"; d.textContent=" ●"; d.title="按现价实时推算（非推荐时锁定）"; td.appendChild(d); }
       if (s.rsi14!=null){ var r=document.createElement("span"); r.className="nm"; r.textContent="RSI "+s.rsi14; td.appendChild(r); }
     }},
-  { key:"reason", label:"看好原因", sort:function(s){return s.reason||"";},
+  { key:"reason", label:"看好原因", w:"15%", sort:function(s){return s.reason||"";},
     cell:function(s,td){ td.className="reason"; td.textContent = s.reason||"—"; }},
 ];
 
@@ -203,6 +212,7 @@ function buildHead(){
   tr.textContent = "";
   COLS.forEach(function(col){
     var th = document.createElement("th");
+    if (col.w) th.style.width = col.w;
     th.textContent = col.label;
     if (col.key === sortKey){
       var ar = document.createElement("span"); ar.className="arrow"; ar.textContent = sortDir<0 ? " ↓" : " ↑";
