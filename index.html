@@ -94,7 +94,7 @@
 <div id="error"></div>
 
 <div id="controls" style="display:none">
-  <select id="typeFilter"><option value="">全部类型</option></select>
+  <select id="typeFilter"><option value="">全部板块</option></select>
   <input id="search" type="search" placeholder="搜索代码 / 公司 / 理由">
   <span class="count" id="count"></span>
 </div>
@@ -148,6 +148,20 @@ function fmtMoney(x){
   return "$" + Number(x).toFixed(2);
 }
 function pctClass(x){ return (x>=0) ? "pos" : "neg"; }
+// 推荐日 -> 截止日 的自然日数（截止日取 meta.data_as_of，缺失退回今天）
+var AS_OF = null;
+function parseYMD(s){
+  if (!s) return null;
+  var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s));
+  if (!m) return null;
+  return new Date(Number(m[1]), Number(m[2])-1, Number(m[3]));
+}
+function daysSinceRec(recDate){
+  var a = parseYMD(recDate); if (!a) return null;
+  var b = parseYMD(AS_OF) || new Date();
+  var d = Math.round((b - a) / 86400000);
+  return d >= 0 ? d : null;
+}
 
 // ---------- 解密 ----------
 async function deriveKey(passphrase, salt, iterations){
@@ -184,14 +198,18 @@ var COLS = [
       var a = document.createElement("span"); a.className="tk"; a.textContent = s.ticker||"—"; td.appendChild(a);
       if (s.name){ var n=document.createElement("span"); n.className="nm"; n.textContent=s.name; td.appendChild(n); }
     }},
-  { key:"business", label:"核心业务", w:"13%", sort:function(s){return s.business||"";},
+  { key:"business", label:"核心业务", w:"11%", sort:function(s){return s.business||"";},
     cell:function(s,td){ td.className="biz"; td.textContent = s.business||"—"; }},
-  { key:"type", label:"类型", w:"6%", sort:function(s){return s.type||"";},
-    cell:function(s,td){ var c=document.createElement("span"); c.className="chip"; c.textContent=s.type||"—"; td.appendChild(c); }},
+  { key:"sector", label:"板块", w:"8%", sort:function(s){return s.sector||s.type||"";},
+    cell:function(s,td){ var c=document.createElement("span"); c.className="chip"; c.textContent=s.sector||s.type||"—"; td.appendChild(c); }},
   { key:"depth", label:"Depth", w:"5%", num:true, sort:function(s){return s.depth;},
     cell:function(s,td){ td.classList.add("num"); td.textContent = (s.depth==null?"—":s.depth); }},
-  { key:"rec_date", label:"推荐日", w:"7%", sort:function(s){return s.rec_date||"";},
-    cell:function(s,td){ td.textContent = s.rec_date||"—"; }},
+  { key:"rec_date", label:"推荐日", w:"8%", sort:function(s){return s.rec_date||"";},
+    cell:function(s,td){
+      td.textContent = s.rec_date||"—";
+      var dd = daysSinceRec(s.rec_date);
+      if (dd!=null){ var n=document.createElement("span"); n.className="nm"; n.textContent="持有 "+dd+" 天"; td.appendChild(n); }
+    }},
   { key:"chg_vs_rec", label:"现价 (较荐)", w:"11%", num:true, sort:function(s){return s.chg_vs_rec;},
     cell:function(s,td){
       td.classList.add("num");
@@ -207,7 +225,7 @@ var COLS = [
     }},
   { key:"fwd_pe", label:"PE/PEG", w:"6%", num:true, sort:function(s){return s.fwd_pe;},
     cell:function(s,td){ td.classList.add("num"); td.textContent = (s.fwd_pe==null?"—":s.fwd_pe) + " / " + (s.peg==null?"—":s.peg); }},
-  { key:"growth", label:"增长预期", w:"11%", sort:function(s){return s.growth||"";},
+  { key:"growth", label:"增长预期", w:"10%", sort:function(s){return s.growth||"";},
     cell:function(s,td){ td.textContent = s.growth||"—"; }},
   { key:"buy_zone", label:"买区 (状态)", w:"12%", sort:function(s){return zoneRank(s)*100 - (s.depth==null?0:s.depth);},
     cell:function(s,td){
@@ -251,7 +269,7 @@ function currentRows(){
   var q = ($("search").value||"").trim().toLowerCase();
   var col = COLS.filter(function(c){return c.key===sortKey;})[0] || COLS[0];
   var rows = STOCKS.filter(function(s){
-    if (t && s.type !== t) return false;
+    if (t && (s.sector||s.type) !== t) return false;
     if (q){
       var hay = ((s.ticker||"")+" "+(s.name||"")+" "+(s.business||"")+" "+(s.reason||"")).toLowerCase();
       if (hay.indexOf(q) < 0) return false;
@@ -308,6 +326,12 @@ function renderFoot(rows){
     if (col.key === "ticker"){
       var l = document.createElement("span"); l.className="avg-lbl"; l.textContent="平均"; td.appendChild(l);
       var n = document.createElement("span"); n.className="nm"; n.textContent=rows.length+" 只"; td.appendChild(n);
+    } else if (col.key === "rec_date"){
+      var dz = avgOf(rows, function(s){ return daysSinceRec(s.rec_date); });
+      if (dz){
+        td.appendChild(document.createTextNode("持有 "+Math.round(dz.mean)+" 天"));
+        var sub=document.createElement("span"); sub.className="nm"; sub.textContent="均"; td.appendChild(sub);
+      } else td.textContent="—";
     } else if (col.key === "chg_vs_rec"){
       td.classList.add("num");
       var a = avgOf(rows, function(s){ return s.chg_vs_rec; });
@@ -350,6 +374,7 @@ function renderUpdates(updates){
 
 function render(data){
   var meta = data.meta || {};
+  AS_OF = meta.data_as_of || null;
   var bits = [];
   if (meta.data_as_of) bits.push("数据截至 " + meta.data_as_of);
   if (meta.last_updated) bits.push("更新于 " + meta.last_updated);
@@ -357,10 +382,13 @@ function render(data){
   $("status").textContent = bits.join(" · ") || "已加载";
 
   STOCKS = Array.isArray(data.stocks) ? data.stocks : [];
-  // 类型下拉
-  var types = {}; STOCKS.forEach(function(s){ if (s.type) types[s.type]=1; });
+  // 板块下拉（粗粒度行业；按固定顺序展示，未知板块追加在后）
+  var ORDER = ["软件", "AI 产业链", "消费", "其他"];
+  var present = {}; STOCKS.forEach(function(s){ var v=s.sector||s.type; if (v) present[v]=1; });
+  var ordered = ORDER.filter(function(x){ return present[x]; })
+    .concat(Object.keys(present).filter(function(x){ return ORDER.indexOf(x)<0; }).sort());
   var sel = $("typeFilter");
-  Object.keys(types).sort().forEach(function(tp){
+  ordered.forEach(function(tp){
     var o = document.createElement("option"); o.value=tp; o.textContent=tp; sel.appendChild(o);
   });
   sel.onchange = renderBody;
