@@ -59,6 +59,13 @@
   .zone-below { color: var(--red); font-weight: 600; }
   .zone-above { color: var(--dim); }
   .live-dot { color: var(--accent); font-size: 10px; } /* 实时推算的买区 */
+  /* 底部平均行：吸底常显，等权统计当前筛选出的行 */
+  tfoot td {
+    position: sticky; bottom: 0; background: var(--panel);
+    border-top: 2px solid var(--accent); border-bottom: none;
+    font-size: 12px; font-weight: 600; z-index: 3;
+  }
+  tfoot .avg-lbl { color: var(--dim); font-weight: 600; }
   /* 动态更新 */
   #updates { padding: 8px 16px 40px; }
   #updates h2 { font-size: 14px; color: var(--dim); margin: 16px 0 8px; }
@@ -95,6 +102,7 @@
 <div class="wrap"><table id="tbl" style="display:none">
   <thead><tr id="head"></tr></thead>
   <tbody id="body"></tbody>
+  <tfoot id="foot"></tfoot>
 </table></div>
 
 <div id="updates" style="display:none">
@@ -276,7 +284,46 @@ function renderBody(){
     });
     body.appendChild(tr);
   });
+  renderFoot(rows);
   $("count").textContent = rows.length + " / " + STOCKS.length + " 只";
+}
+
+// 等权平均：对当前筛选出的行取某字段的均值，忽略缺值
+function avgOf(rows, pick){
+  var xs = [];
+  rows.forEach(function(s){ var v = pick(s); if (v!=null && !isNaN(v)) xs.push(v); });
+  if (!xs.length) return null;
+  var sum = 0; xs.forEach(function(v){ sum += v; });
+  return { mean: sum/xs.length, n: xs.length };
+}
+
+// 底部「平均」行：从推荐至今的等权平均涨跌幅 + 平均上行空间
+function renderFoot(rows){
+  var foot = $("foot");
+  foot.textContent = "";
+  if (!rows.length) return;
+  var tr = document.createElement("tr");
+  COLS.forEach(function(col){
+    var td = document.createElement("td");
+    if (col.key === "ticker"){
+      var l = document.createElement("span"); l.className="avg-lbl"; l.textContent="平均"; td.appendChild(l);
+      var n = document.createElement("span"); n.className="nm"; n.textContent=rows.length+" 只"; td.appendChild(n);
+    } else if (col.key === "chg_vs_rec"){
+      td.classList.add("num");
+      var a = avgOf(rows, function(s){ return s.chg_vs_rec; });
+      if (a){
+        var c=document.createElement("span"); c.className=pctClass(a.mean); c.textContent=fmtPct(a.mean); td.appendChild(c);
+        var sub=document.createElement("span"); sub.className="nm"; sub.textContent=a.n+" 只计入"; td.appendChild(sub);
+      } else td.textContent="—";
+    } else if (col.key === "upside"){
+      td.classList.add("num");
+      var u = avgOf(rows, function(s){ return s.upside; });
+      if (u){ var c=document.createElement("span"); c.className=pctClass(u.mean); c.textContent=fmtPct(u.mean); td.appendChild(c); }
+      else td.textContent="—";
+    }
+    tr.appendChild(td);
+  });
+  foot.appendChild(tr);
 }
 
 function renderUpdates(updates){
