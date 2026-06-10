@@ -55,6 +55,10 @@
   .biz { color: #aeb6c4; font-size: 11px; line-height: 1.35; }
   .pos { color: var(--green); } .neg { color: var(--red); }
   .chip { display: inline-block; padding: 1px 7px; border-radius: 999px; background: var(--chip); font-size: 11px; color: var(--txt); }
+  /* 策略 chip（三策略 Agent） */
+  .s-value { background: #15324d; color: #8cc6ff; }
+  .s-growth { background: #3a2f12; color: #f0d27f; }
+  .s-vc { background: #2a1f3d; color: #cda8ff; }
   .zone-in { color: var(--green); font-weight: 600; }
   .zone-below { color: var(--red); font-weight: 600; }
   .zone-above { color: var(--dim); }
@@ -94,6 +98,7 @@
 <div id="error"></div>
 
 <div id="controls" style="display:none">
+  <select id="strategyFilter"><option value="">全部策略</option></select>
   <select id="typeFilter"><option value="">全部板块</option></select>
   <input id="search" type="search" placeholder="搜索代码 / 公司 / 理由">
   <span class="count" id="count"></span>
@@ -187,6 +192,14 @@ async function decryptEnvelope(env, passphrase){
 // 默认：买区状态排序（在买区置顶，组内 Depth 高者优先）
 var STOCKS = [], sortKey = "buy_zone", sortDir = 1;
 
+// 三策略 Agent（💎价值 / 🚀高成长 / 🎲VC）
+var STRATEGY_META = {
+  "价值":   { emoji: "💎", cls: "s-value" },
+  "高成长": { emoji: "🚀", cls: "s-growth" },
+  "VC":     { emoji: "🎲", cls: "s-vc" }
+};
+var STRATEGY_ORDER = ["价值", "高成长", "VC"];
+
 function zoneRank(s){
   var st = (s.buy_zone && s.buy_zone.status) || "";
   return st.indexOf("在买区")>=0 ? 0 : (st.indexOf("跌破")>=0 ? 1 : (st ? 2 : 3));
@@ -198,11 +211,20 @@ var COLS = [
       var a = document.createElement("span"); a.className="tk"; a.textContent = s.ticker||"—"; td.appendChild(a);
       if (s.name){ var n=document.createElement("span"); n.className="nm"; n.textContent=s.name; td.appendChild(n); }
     }},
-  { key:"business", label:"核心业务", w:"11%", sort:function(s){return s.business||"";},
+  { key:"strategy", label:"策略", w:"7%", sort:function(s){return s.strategy||"";},
+    cell:function(s,td){
+      var st = s.strategy||"";
+      var meta = STRATEGY_META[st];
+      var c=document.createElement("span");
+      c.className = "chip" + (meta ? " "+meta.cls : "");
+      c.textContent = meta ? meta.emoji+" "+st : (st||"—");
+      td.appendChild(c);
+    }},
+  { key:"business", label:"核心业务", w:"10%", sort:function(s){return s.business||"";},
     cell:function(s,td){ td.className="biz"; td.textContent = s.business||"—"; }},
-  { key:"sector", label:"板块", w:"8%", sort:function(s){return s.sector||s.type||"";},
+  { key:"sector", label:"板块", w:"7%", sort:function(s){return s.sector||s.type||"";},
     cell:function(s,td){ var c=document.createElement("span"); c.className="chip"; c.textContent=s.sector||s.type||"—"; td.appendChild(c); }},
-  { key:"depth", label:"Depth", w:"5%", num:true, sort:function(s){return s.depth;},
+  { key:"depth", label:"Depth", w:"4%", num:true, sort:function(s){return s.depth;},
     cell:function(s,td){ td.classList.add("num"); td.textContent = (s.depth==null?"—":s.depth); }},
   { key:"rec_date", label:"推荐日", w:"8%", sort:function(s){return s.rec_date||"";},
     cell:function(s,td){
@@ -210,14 +232,14 @@ var COLS = [
       var dd = daysSinceRec(s.rec_date);
       if (dd!=null){ var n=document.createElement("span"); n.className="nm"; n.textContent="持有 "+dd+" 天"; td.appendChild(n); }
     }},
-  { key:"chg_vs_rec", label:"现价 (较荐)", w:"11%", num:true, sort:function(s){return s.chg_vs_rec;},
+  { key:"chg_vs_rec", label:"现价 (较荐)", w:"10%", num:true, sort:function(s){return s.chg_vs_rec;},
     cell:function(s,td){
       td.classList.add("num");
       td.appendChild(document.createTextNode(fmtMoney(s.last_price)));
       if (s.chg_vs_rec!=null){ var c=document.createElement("span"); c.className=pctClass(s.chg_vs_rec); c.textContent=" "+fmtPct(s.chg_vs_rec); td.appendChild(c); }
       var sub=document.createElement("span"); sub.className="nm"; sub.textContent="荐 "+fmtMoney(s.rec_price); td.appendChild(sub);
     }},
-  { key:"upside", label:"目标 (上行)", w:"9%", num:true, sort:function(s){return s.upside;},
+  { key:"upside", label:"目标 (上行)", w:"8%", num:true, sort:function(s){return s.upside;},
     cell:function(s,td){
       td.classList.add("num");
       td.appendChild(document.createTextNode(fmtMoney(s.target)));
@@ -225,9 +247,9 @@ var COLS = [
     }},
   { key:"fwd_pe", label:"PE/PEG", w:"6%", num:true, sort:function(s){return s.fwd_pe;},
     cell:function(s,td){ td.classList.add("num"); td.textContent = (s.fwd_pe==null?"—":s.fwd_pe) + " / " + (s.peg==null?"—":s.peg); }},
-  { key:"growth", label:"增长预期", w:"10%", sort:function(s){return s.growth||"";},
+  { key:"growth", label:"增长预期", w:"9%", sort:function(s){return s.growth||"";},
     cell:function(s,td){ td.textContent = s.growth||"—"; }},
-  { key:"buy_zone", label:"买区 (状态)", w:"12%", sort:function(s){return zoneRank(s)*100 - (s.depth==null?0:s.depth);},
+  { key:"buy_zone", label:"买区 (状态)", w:"11%", sort:function(s){return zoneRank(s)*100 - (s.depth==null?0:s.depth);},
     cell:function(s,td){
       var z = s.buy_zone||{};
       if (z.low==null){ td.textContent="—"; return; }
@@ -266,9 +288,11 @@ function buildHead(){
 
 function currentRows(){
   var t = $("typeFilter").value;
+  var st = $("strategyFilter").value;
   var q = ($("search").value||"").trim().toLowerCase();
   var col = COLS.filter(function(c){return c.key===sortKey;})[0] || COLS[0];
   var rows = STOCKS.filter(function(s){
+    if (st && (s.strategy||"") !== st) return false;
     if (t && (s.sector||s.type) !== t) return false;
     if (q){
       var hay = ((s.ticker||"")+" "+(s.name||"")+" "+(s.business||"")+" "+(s.reason||"")).toLowerCase();
@@ -392,6 +416,18 @@ function render(data){
     var o = document.createElement("option"); o.value=tp; o.textContent=tp; sel.appendChild(o);
   });
   sel.onchange = renderBody;
+  // 策略下拉（固定顺序，只列实际存在的）
+  var stPresent = {}; STOCKS.forEach(function(s){ if (s.strategy) stPresent[s.strategy]=1; });
+  var stSel = $("strategyFilter");
+  STRATEGY_ORDER.filter(function(x){ return stPresent[x]; })
+    .concat(Object.keys(stPresent).filter(function(x){ return STRATEGY_ORDER.indexOf(x)<0; }).sort())
+    .forEach(function(sv){
+      var meta = STRATEGY_META[sv];
+      var o = document.createElement("option"); o.value=sv;
+      o.textContent = meta ? meta.emoji+" "+sv : sv;
+      stSel.appendChild(o);
+    });
+  stSel.onchange = renderBody;
   $("search").oninput = renderBody;
 
   buildHead(); renderBody();
