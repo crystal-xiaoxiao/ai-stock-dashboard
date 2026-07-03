@@ -80,6 +80,8 @@
   .wrow .fired { color:#e05c4b; font-weight:600; }
   .wrow .near { color:#d99a20; }
   .wrow .info { color: var(--dim); }
+  .cond-chip { margin-left:4px; font-size:10px; }
+  .cond-note { display:block; color:#d99a20; }
   .upd { display: flex; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line); align-items: baseline; }
   .upd .d { color: var(--dim); font-size: 11px; min-width: 74px; }
   .upd .t { flex: 1; }
@@ -165,6 +167,7 @@ function fmtMoney(x){
   return "$" + Number(x).toFixed(2);
 }
 function pctClass(x){ return (x>=0) ? "pos" : "neg"; }
+function isCond(s){ return ((s.tier||"").indexOf("条件") === 0); }
 // 推荐日 -> 截止日 的自然日数（截止日取 meta.data_as_of，缺失退回今天）
 var AS_OF = null;
 function parseYMD(s){
@@ -221,7 +224,15 @@ var COLS = [
   { key:"ticker", label:"代码/公司", w:"9%", sort:function(s){return s.ticker||"";},
     cell:function(s,td){
       var a = document.createElement("span"); a.className="tk"; a.textContent = s.ticker||"—"; td.appendChild(a);
+      if (isCond(s)){
+        var b = document.createElement("span"); b.className="chip cond-chip"; b.textContent = "🟡条件";
+        b.title = "条件推荐：触发限价/事件前不建仓。业绩按推荐时股价起算（限价 ≠ 推荐时股价）。";
+        td.appendChild(b);
+      }
       if (s.name){ var n=document.createElement("span"); n.className="nm"; n.textContent=s.name; td.appendChild(n); }
+      if (isCond(s) && s.cond_price){
+        var cp=document.createElement("span"); cp.className="nm cond-note"; cp.textContent="限价 "+s.cond_price; td.appendChild(cp);
+      }
     }},
   { key:"strategy", label:"策略", w:"7%", sort:function(s){return s.strategy||"";},
     cell:function(s,td){
@@ -370,11 +381,18 @@ function renderFoot(rows){
       } else td.textContent="—";
     } else if (col.key === "chg_vs_rec"){
       td.classList.add("num");
-      var a = avgOf(rows, function(s){ return s.chg_vs_rec; });
+      // 均值只计正式推荐；🟡 条件推荐（还在等触发价）单独列，避免拖歪组均值
+      var formal = rows.filter(function(s){ return !isCond(s); });
+      var conds  = rows.filter(isCond);
+      var a = avgOf(formal, function(s){ return s.chg_vs_rec; });
       if (a){
         var c=document.createElement("span"); c.className=pctClass(a.mean); c.textContent=fmtPct(a.mean); td.appendChild(c);
         var sub=document.createElement("span"); sub.className="nm"; sub.textContent=a.n+" 只计入"; td.appendChild(sub);
       } else td.textContent="—";
+      var ca = avgOf(conds, function(s){ return s.chg_vs_rec; });
+      if (ca){
+        var c2=document.createElement("span"); c2.className="nm"; c2.textContent="🟡条件均 "+fmtPct(ca.mean)+" ("+ca.n+")"; td.appendChild(c2);
+      }
     } else if (col.key === "upside"){
       td.classList.add("num");
       var u = avgOf(rows, function(s){ return s.upside; });
