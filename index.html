@@ -73,6 +73,13 @@
   /* 动态更新 */
   #updates { padding: 8px 16px 40px; }
   #updates h2 { font-size: 14px; color: var(--dim); margin: 16px 0 8px; }
+  #watch { padding: 8px 16px 0; }
+  #watch h2 { font-size: 14px; color: var(--dim); margin: 16px 0 8px; }
+  .wrow { display:flex; gap:8px; padding:5px 0; font-size:13px; line-height:1.5; border-bottom:1px solid rgba(128,128,128,.12); }
+  .wrow .tk { font-weight:600; min-width:52px; }
+  .wrow .fired { color:#e05c4b; font-weight:600; }
+  .wrow .near { color:#d99a20; }
+  .wrow .info { color: var(--dim); }
   .upd { display: flex; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line); align-items: baseline; }
   .upd .d { color: var(--dim); font-size: 11px; min-width: 74px; }
   .upd .t { flex: 1; }
@@ -109,6 +116,11 @@
   <tbody id="body"></tbody>
   <tfoot id="foot"></tfoot>
 </table></div>
+
+<div id="watch" style="display:none">
+  <h2>👀 观察名单（触发价/时点到位自动复评）</h2>
+  <div id="watchfeed"></div>
+</div>
 
 <div id="updates" style="display:none">
   <h2>动态更新</h2>
@@ -396,6 +408,43 @@ function renderUpdates(updates){
   });
 }
 
+function renderWatchlist(items){
+  var box = $("watchfeed");
+  box.textContent = "";
+  if (!items || !items.length){ $("watch").style.display = "none"; return; }
+  var laneEmoji = { value:"💎", growth:"🚀", vc:"🎲" };
+  items.forEach(function(w){
+    var row = document.createElement("div"); row.className = "wrow";
+    var tk = document.createElement("span"); tk.className = "tk";
+    tk.textContent = (laneEmoji[w.lane]||"") + w.ticker; row.appendChild(tk);
+    var t = document.createElement("span");
+    if (w.status === "triggered"){
+      var f = document.createElement("span"); f.className = "fired";
+      f.textContent = "🔔 已触发待复评 "; t.appendChild(f);
+    } else if (w.gap_to_trigger != null && w.gap_to_trigger <= 0.05){
+      var n = document.createElement("span"); n.className = "near";
+      n.textContent = "接近触发 "; t.appendChild(n);
+    }
+    var bits = [];
+    if (w.note) bits.push(w.note);
+    if (w.last_price != null){
+      var p = "现价 $" + w.last_price;
+      if (w.gap_to_trigger != null && w.gap_to_trigger > 0) p += "（距触发 +" + (w.gap_to_trigger*100).toFixed(1) + "%）";
+      bits.push(p);
+    }
+    if (w.review_after) bits.push("复评日 " + w.review_after);
+    if (w.depth != null) bits.push("登记 Depth " + w.depth);
+    t.appendChild(document.createTextNode(bits.join(" · ")));
+    if (w.thesis){
+      var i2 = document.createElement("div"); i2.className = "info"; i2.textContent = w.thesis;
+      t.appendChild(i2);
+    }
+    row.appendChild(t);
+    box.appendChild(row);
+  });
+  $("watch").style.display = "";
+}
+
 function render(data){
   var meta = data.meta || {};
   AS_OF = meta.data_as_of || null;
@@ -431,6 +480,7 @@ function render(data){
   $("search").oninput = renderBody;
 
   buildHead(); renderBody();
+  renderWatchlist(data.watchlist);
   renderUpdates(data.updates);
 
   $("controls").style.display = "flex";
