@@ -47,6 +47,7 @@
   th, td { padding: 6px 6px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; white-space: normal; overflow-wrap: break-word; word-break: break-word; }
   th { color: var(--dim); font-weight: 600; font-size: 11px; line-height: 1.25; cursor: pointer; user-select: none; position: sticky; top: var(--head-top, 53px); z-index: 2; background: var(--bg); }
   th .arrow { color: var(--accent); }
+  th .sorthint { opacity: .35; font-size: 9px; margin-left: 2px; }
   td { font-size: 12px; }
   td.num { font-variant-numeric: tabular-nums; }
   .tk { font-weight: 700; }
@@ -256,7 +257,7 @@ var COLS = [
     cell:function(s,td){ var c=document.createElement("span"); c.className="chip"; c.textContent=s.sector||s.type||"—"; td.appendChild(c); }},
   { key:"depth", label:"Depth", w:"4%", num:true, sort:function(s){return s.depth;},
     cell:function(s,td){ td.classList.add("num"); td.textContent = (s.depth==null?"—":s.depth); }},
-  { key:"rec_date", label:"推荐日", w:"8%", sort:function(s){return s.rec_date||"";},
+  { key:"rec_date", label:"推荐日", w:"8%", desc:true, sort:function(s){return s.rec_date||"";},
     cell:function(s,td){
       td.textContent = s.rec_date||"—";
       var dd = daysSinceRec(s.rec_date);
@@ -306,10 +307,14 @@ function buildHead(){
     if (col.key === sortKey){
       var ar = document.createElement("span"); ar.className="arrow"; ar.textContent = sortDir<0 ? " ↓" : " ↑";
       th.appendChild(ar);
+    } else {
+      var hint = document.createElement("span"); hint.className="sorthint"; hint.textContent="⇅";
+      th.appendChild(hint);
     }
     th.onclick = function(){
       if (sortKey === col.key){ sortDir = -sortDir; }
-      else { sortKey = col.key; sortDir = col.num ? -1 : 1; }
+      // 日期列首次点击就给「最新→最老」（desc:true），数值列同理降序
+      else { sortKey = col.key; sortDir = (col.num || col.desc) ? -1 : 1; }
       buildHead(); renderBody();
     };
     tr.appendChild(th);
