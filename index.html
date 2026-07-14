@@ -109,6 +109,13 @@
 <div id="controls" style="display:none">
   <select id="strategyFilter"><option value="">全部策略</option></select>
   <select id="typeFilter"><option value="">全部板块</option></select>
+  <select id="dateFilter">
+    <option value="">全部时间</option>
+    <option value="7">最近 7 天</option>
+    <option value="14">最近 14 天</option>
+    <option value="30">最近 30 天</option>
+    <option value="90">最近 90 天</option>
+  </select>
   <input id="search" type="search" placeholder="搜索代码 / 公司 / 理由">
   <span class="count" id="count"></span>
 </div>
@@ -312,11 +319,17 @@ function buildHead(){
 function currentRows(){
   var t = $("typeFilter").value;
   var st = $("strategyFilter").value;
+  var dr = $("dateFilter").value;
   var q = ($("search").value||"").trim().toLowerCase();
   var col = COLS.filter(function(c){return c.key===sortKey;})[0] || COLS[0];
   var rows = STOCKS.filter(function(s){
     if (st && (s.strategy||"") !== st) return false;
     if (t && (s.sector||s.type) !== t) return false;
+    if (dr){
+      // 与「持有 N 天」同口径（锚定 data_as_of 而非浏览器本地日期）；无推荐日的行不算「最近」
+      var dd = daysSinceRec(s.rec_date);
+      if (dd == null || dd > Number(dr)) return false;
+    }
     if (q){
       var hay = ((s.ticker||"")+" "+(s.name||"")+" "+(s.business||"")+" "+(s.reason||"")).toLowerCase();
       if (hay.indexOf(q) < 0) return false;
@@ -495,6 +508,7 @@ function render(data){
       stSel.appendChild(o);
     });
   stSel.onchange = renderBody;
+  $("dateFilter").onchange = renderBody;
   $("search").oninput = renderBody;
 
   buildHead(); renderBody();
