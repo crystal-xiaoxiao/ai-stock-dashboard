@@ -95,6 +95,38 @@
   .b-influencer_pick { background: #2a1f3d; color: #cda8ff; }
   .b-cross_lane { background: #123a3a; color: #7fe0d8; }
   .b-dev_news { background: #232a38; color: #aab6cc; }
+  /* ---------- Tab 导航 ---------- */
+  #tabs { display: flex; gap: 6px; padding: 10px 16px 0; border-bottom: 1px solid var(--line); }
+  .tab {
+    padding: 7px 16px; border-radius: 8px 8px 0 0; cursor: pointer; font-size: 13px;
+    color: var(--dim); background: transparent; border: 1px solid transparent; border-bottom: none;
+    user-select: none;
+  }
+  .tab.active { background: var(--panel); color: var(--txt); border-color: var(--line); font-weight: 600; }
+  /* ---------- Model Portfolio ---------- */
+  #portfolio { display: none; padding: 12px 16px 40px; }
+  #portfolio h2 { font-size: 14px; color: var(--dim); margin: 14px 0 8px; }
+  .mp-meta { color: var(--dim); font-size: 12px; margin: 2px 0 10px; line-height: 1.6; }
+  .mp-chartbox { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 8px 4px; }
+  .mp-legend { display: flex; flex-wrap: wrap; gap: 14px; padding: 4px 8px 8px; font-size: 12px; color: var(--dim); }
+  .mp-legend .sw { display: inline-block; width: 22px; height: 0; border-top: 2.5px solid; vertical-align: middle; margin-right: 5px; }
+  .mp-tip {
+    display: none; position: absolute; pointer-events: none; z-index: 6;
+    background: #1d222c; border: 1px solid var(--line); border-radius: 8px;
+    padding: 7px 10px; font-size: 12px; line-height: 1.55; white-space: nowrap;
+    box-shadow: 0 4px 14px rgba(0,0,0,.4);
+  }
+  .mp-tip .d { color: var(--dim); font-size: 11px; }
+  .mp-tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 12px; }
+  @media (min-width: 560px) { .mp-tiles { grid-template-columns: repeat(3, 1fr); } }
+  @media (min-width: 900px) { .mp-tiles { grid-template-columns: repeat(6, 1fr); } }
+  .mp-tile { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; min-width: 0; }
+  .mp-tile .lbl { color: var(--dim); font-size: 11px; }
+  .mp-tile .val { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .mp-tile .sub { color: var(--dim); font-size: 10px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  #mp-holdings { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  #mp-holdings table { table-layout: auto; min-width: 560px; }
+  #mp-holdings th { position: static; }
   @media (max-width: 560px) {
     body { font-size: 13px; }
   }
@@ -107,6 +139,23 @@
 </header>
 
 <div id="error"></div>
+
+<div id="tabs" style="display:none">
+  <div class="tab active" id="tab-stocks">📋 荐股</div>
+  <div class="tab" id="tab-portfolio">📈 组合</div>
+</div>
+
+<div id="portfolio">
+  <div class="mp-meta" id="mp-meta"></div>
+  <div class="mp-chartbox">
+    <div class="mp-legend" id="mp-legend"></div>
+    <div id="mp-chart"></div>
+    <div class="mp-tip" id="mp-tip"></div>
+  </div>
+  <div class="mp-tiles" id="mp-tiles"></div>
+  <h2>当前持仓（每周五收盘调仓）</h2>
+  <div id="mp-holdings"></div>
+</div>
 
 <div id="controls" style="display:none">
   <select id="strategyFilter"><option value="">全部策略</option></select>
@@ -448,7 +497,8 @@ function renderUpdates(updates){
 function renderWatchlist(items){
   var box = $("watchfeed");
   box.textContent = "";
-  if (!items || !items.length){ $("watch").style.display = "none"; return; }
+  WATCH_VISIBLE = !!(items && items.length);
+  if (!WATCH_VISIBLE){ $("watch").style.display = "none"; return; }
   var laneEmoji = { value:"💎", growth:"🚀", vc:"🎲" };
   items.forEach(function(w){
     var row = document.createElement("div"); row.className = "wrow";
@@ -480,6 +530,234 @@ function renderWatchlist(items){
     box.appendChild(row);
   });
   $("watch").style.display = "";
+}
+
+// ---------- Model Portfolio ----------
+var WATCH_VISIBLE = false;
+
+function svgEl(tag, attrs){
+  var el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (var k in attrs) el.setAttribute(k, attrs[k]);
+  return el;
+}
+
+function renderPortfolio(mp){
+  if (!mp || !mp.nav_series || !mp.nav_series.length){
+    $("mp-meta").textContent = "组合数据暂不可用（等下一次数据刷新）。";
+    return;
+  }
+  // ---- meta 行 ----
+  var meta = [];
+  meta.push("策略：" + (mp.strategy||""));
+  meta.push("数据截至 " + (mp.as_of||"—"));
+  meta.push("上次调仓 " + (mp.last_rebalance||"—"));
+  meta.push("虚线 = 回测（≤ " + mp.live_anchor + "），实线 = 实盘模拟");
+  $("mp-meta").textContent = meta.join(" · ");
+
+  // ---- 数据准备（统一转成 {t(ms), v(指数=100)}）----
+  function toPts(arr){
+    var out = [];
+    (arr||[]).forEach(function(p){
+      var d = parseYMD(p.date);
+      if (d && p.nav != null) out.push({ t: d.getTime(), v: p.nav * 100, date: p.date });
+    });
+    return out;
+  }
+  var port = toPts(mp.nav_series);
+  var spy = toPts((mp.benchmarks||{}).SPY);
+  var qqq = toPts((mp.benchmarks||{}).QQQ);
+  var anchorT = parseYMD(mp.live_anchor).getTime();
+
+  // ---- 比例尺 ----
+  var W = 820, H = 300, L = 44, R = 12, T = 12, B = 24;
+  var allPts = port.concat(spy).concat(qqq);
+  var tMin = Infinity, tMax = -Infinity, vMin = Infinity, vMax = -Infinity;
+  allPts.forEach(function(p){
+    if (p.t < tMin) tMin = p.t; if (p.t > tMax) tMax = p.t;
+    if (p.v < vMin) vMin = p.v; if (p.v > vMax) vMax = p.v;
+  });
+  var vPad = (vMax - vMin) * 0.07 || 1;
+  vMin -= vPad; vMax += vPad;
+  function X(t){ return L + (t - tMin) / (tMax - tMin) * (W - L - R); }
+  function Y(v){ return T + (vMax - v) / (vMax - vMin) * (H - T - B); }
+  function path(pts){
+    return pts.map(function(p,i){ return (i?"L":"M") + X(p.t).toFixed(1) + " " + Y(p.v).toFixed(1); }).join(" ");
+  }
+
+  var svg = svgEl("svg", { viewBox: "0 0 "+W+" "+H, width: "100%", height: "auto", "font-family": "inherit" });
+
+  // 网格 + y 轴刻度
+  var step = (vMax - vMin) / 4;
+  for (var i=0;i<=4;i++){
+    var v = vMin + step*i, y = Y(v);
+    svg.appendChild(svgEl("line", { x1:L, y1:y, x2:W-R, y2:y, stroke:"#262b36", "stroke-width":1 }));
+    var lb = svgEl("text", { x:L-6, y:y+4, "text-anchor":"end", fill:"#8a93a6", "font-size":10 });
+    lb.textContent = Math.round(v);
+    svg.appendChild(lb);
+  }
+  // 100 基线
+  if (vMin < 100 && vMax > 100)
+    svg.appendChild(svgEl("line", { x1:L, y1:Y(100), x2:W-R, y2:Y(100), stroke:"#3a4152", "stroke-width":1, "stroke-dasharray":"1 3" }));
+  // x 轴日期刻度（约 5 个）
+  var nTicks = 5;
+  for (var j=0;j<nTicks;j++){
+    var tt = tMin + (tMax - tMin) * j/(nTicks-1);
+    var near = port.reduce(function(a,p){ return Math.abs(p.t-tt) < Math.abs(a.t-tt) ? p : a; }, port[0]);
+    var xl = svgEl("text", { x:X(near.t), y:H-8, "text-anchor": j===0?"start":(j===nTicks-1?"end":"middle"), fill:"#8a93a6", "font-size":10 });
+    xl.textContent = near.date.slice(5);
+    svg.appendChild(xl);
+  }
+  // 回测/实盘分界线
+  if (anchorT > tMin && anchorT < tMax){
+    svg.appendChild(svgEl("line", { x1:X(anchorT), y1:T, x2:X(anchorT), y2:H-B, stroke:"#3a4152", "stroke-width":1, "stroke-dasharray":"3 3" }));
+    // 分界线贴近右缘时标签放到线左侧，避免被裁切
+    var onRight = X(anchorT) < (W - R) * 0.8;
+    var bl = svgEl("text", { x:X(anchorT) + (onRight ? 4 : -4), y:T+10, fill:"#8a93a6", "font-size":10,
+                             "text-anchor": onRight ? "start" : "end" });
+    bl.textContent = onRight ? "▶ 实盘模拟" : "实盘模拟 ▶";
+    svg.appendChild(bl);
+  }
+  // 基准线（中性灰，线型区分）
+  if (spy.length) svg.appendChild(svgEl("path", { d:path(spy), fill:"none", stroke:"#898781", "stroke-width":1.5 }));
+  if (qqq.length) svg.appendChild(svgEl("path", { d:path(qqq), fill:"none", stroke:"#898781", "stroke-width":1.5, "stroke-dasharray":"2 4", "stroke-linecap":"round" }));
+  // 组合：虚线回测段 + 实线实盘段（共享 anchor 点）
+  var back = port.filter(function(p){ return p.t <= anchorT; });
+  var live = port.filter(function(p){ return p.t >= anchorT; });
+  if (back.length) svg.appendChild(svgEl("path", { d:path(back), fill:"none", stroke:"#3987e5", "stroke-width":2.4, "stroke-dasharray":"7 5", "stroke-linecap":"round" }));
+  if (live.length > 1) svg.appendChild(svgEl("path", { d:path(live), fill:"none", stroke:"#3987e5", "stroke-width":2.6, "stroke-linecap":"round" }));
+  // 末点标记
+  var lastP = port[port.length-1];
+  svg.appendChild(svgEl("circle", { cx:X(lastP.t), cy:Y(lastP.v), r:3.5, fill:"#3987e5" }));
+
+  // ---- hover 十字线 + tooltip ----
+  var cross = svgEl("line", { x1:0, y1:T, x2:0, y2:H-B, stroke:"#8a93a6", "stroke-width":1, "stroke-dasharray":"2 2", visibility:"hidden" });
+  svg.appendChild(cross);
+  var overlay = svgEl("rect", { x:L, y:T, width:W-L-R, height:H-T-B, fill:"transparent" });
+  svg.appendChild(overlay);
+  var tip = $("mp-tip"), box = $("mp-chart");
+  function nearestIdx(t){
+    var best = 0, bd = Infinity;
+    for (var i=0;i<port.length;i++){ var d = Math.abs(port[i].t - t); if (d < bd){ bd = d; best = i; } }
+    return best;
+  }
+  function lookup(arr, date){
+    for (var i=0;i<arr.length;i++) if (arr[i].date === date) return arr[i].v;
+    return null;
+  }
+  function onMove(ev){
+    var rect = svg.getBoundingClientRect();
+    var sx = W / rect.width;
+    var vx = (ev.clientX - rect.left) * sx;
+    var t = tMin + (vx - L) / (W - L - R) * (tMax - tMin);
+    var p = port[nearestIdx(t)];
+    cross.setAttribute("x1", X(p.t)); cross.setAttribute("x2", X(p.t));
+    cross.setAttribute("visibility", "visible");
+    var rows = ['<span class="d">' + p.date + (p.t <= anchorT ? " · 回测" : " · 实盘模拟") + "</span>"];
+    rows.push("组合 <b>" + fmtPct(p.v/100 - 1) + "</b>");
+    var sv = lookup(spy, p.date); if (sv != null) rows.push("SPY " + fmtPct(sv/100 - 1));
+    var qv = lookup(qqq, p.date); if (qv != null) rows.push("QQQ " + fmtPct(qv/100 - 1));
+    tip.innerHTML = rows.join("<br>");
+    tip.style.display = "block";
+    var bx = box.getBoundingClientRect();
+    var px = (X(p.t) / sx) + (rect.left - bx.left);
+    var flip = px > bx.width * 0.62;
+    tip.style.left = flip ? "" : (px + 12) + "px";
+    tip.style.right = flip ? (bx.width - px + 12) + "px" : "";
+    tip.style.top = "30px";
+  }
+  overlay.addEventListener("pointermove", onMove);
+  overlay.addEventListener("pointerdown", onMove);
+  overlay.addEventListener("pointerleave", function(){
+    cross.setAttribute("visibility", "hidden"); tip.style.display = "none";
+  });
+
+  box.textContent = "";
+  box.appendChild(svg);
+
+  // ---- 图例 ----
+  var lg = $("mp-legend");
+  lg.textContent = "";
+  [["#3987e5","solid","组合（虚=回测 实=模拟）"],["#898781","solid","SPY"],["#898781","dotted","QQQ"]].forEach(function(it){
+    var s = document.createElement("span");
+    var sw = document.createElement("span"); sw.className = "sw";
+    sw.style.borderTopColor = it[0]; sw.style.borderTopStyle = it[1];
+    s.appendChild(sw); s.appendChild(document.createTextNode(it[2]));
+    lg.appendChild(s);
+  });
+
+  // ---- 指标卡 ----
+  var tiles = $("mp-tiles");
+  tiles.textContent = "";
+  var mFull = (mp.metrics||{}).full || {};
+  var mLive = (mp.metrics||{}).live;
+  function tile(label, val, cls, sub){
+    var d = document.createElement("div"); d.className = "mp-tile";
+    var l = document.createElement("div"); l.className = "lbl"; l.textContent = label; d.appendChild(l);
+    var v = document.createElement("div"); v.className = "val" + (cls ? " "+cls : ""); v.textContent = val; d.appendChild(v);
+    if (sub){ var s = document.createElement("div"); s.className = "sub"; s.textContent = sub; d.appendChild(s); }
+    tiles.appendChild(d);
+  }
+  function liveSub(pick){
+    return (mLive && pick(mLive) != null) ? "实盘段 " + pick(mLive) : null;
+  }
+  function cls(x){ return x != null ? pctClass(x) : null; }
+  tile("累计收益（全期）", fmtPct(mFull.cum), cls(mFull.cum), liveSub(function(m){ return fmtPct(m.cum); }));
+  tile("年化", fmtPct(mFull.ann), cls(mFull.ann), "样本短，仅供参考");
+  tile("最大回撤", mFull.max_dd != null ? "-" + (mFull.max_dd*100).toFixed(1) + "%" : "—", mFull.max_dd != null ? "neg" : null, null);
+  tile("周胜率", mFull.win != null ? (mFull.win*100).toFixed(0) + "%" : "—", null, mFull.n_periods != null ? mFull.n_periods + " 个区间" : null);
+  tile("Sharpe（年化）", mFull.sharpe != null ? mFull.sharpe.toFixed(2) : "—", null, "rf=" + (mp.rf_annual_pct != null ? mp.rf_annual_pct + "%" : "—"));
+  tile("超额 vs SPY", fmtPct(mFull.excess_spy), cls(mFull.excess_spy), liveSub(function(m){ return fmtPct(m.excess_spy); }));
+
+  // ---- 持仓明细 ----
+  var hbox = $("mp-holdings");
+  hbox.textContent = "";
+  var tb = document.createElement("table");
+  var thead = document.createElement("thead");
+  var htr = document.createElement("tr");
+  ["代码","权重","建仓","现价（较建仓）","目标（剩余空间）","推荐日"].forEach(function(h){
+    var th = document.createElement("th"); th.textContent = h; htr.appendChild(th);
+  });
+  thead.appendChild(htr); tb.appendChild(thead);
+  var tbody = document.createElement("tbody");
+  (mp.holdings||[]).forEach(function(h){
+    var tr = document.createElement("tr");
+    var td1 = document.createElement("td");
+    var tk = document.createElement("span"); tk.className = "tk"; tk.textContent = h.ticker; td1.appendChild(tk);
+    var lm = STRATEGY_META[h.lane];
+    if (lm){ var c = document.createElement("span"); c.className = "chip "+lm.cls; c.style.marginLeft = "6px"; c.textContent = lm.emoji; td1.appendChild(c); }
+    tr.appendChild(td1);
+    var td2 = document.createElement("td"); td2.className = "num"; td2.textContent = h.weight != null ? (h.weight*100).toFixed(1)+"%" : "—"; tr.appendChild(td2);
+    var td3 = document.createElement("td"); td3.className = "num";
+    td3.textContent = fmtMoney(h.entry_px);
+    if (h.entry_date){ var n3 = document.createElement("span"); n3.className = "nm"; n3.textContent = h.entry_date; td3.appendChild(n3); }
+    tr.appendChild(td3);
+    var td4 = document.createElement("td"); td4.className = "num";
+    td4.appendChild(document.createTextNode(fmtMoney(h.last_price)));
+    if (h.since_entry != null){ var c4 = document.createElement("span"); c4.className = pctClass(h.since_entry); c4.textContent = " " + fmtPct(h.since_entry); td4.appendChild(c4); }
+    tr.appendChild(td4);
+    var td5 = document.createElement("td"); td5.className = "num";
+    td5.appendChild(document.createTextNode(fmtMoney(h.target)));
+    if (h.upside != null){ var c5 = document.createElement("span"); c5.className = pctClass(h.upside); c5.textContent = " " + fmtPct(h.upside); td5.appendChild(c5); }
+    tr.appendChild(td5);
+    var td6 = document.createElement("td"); td6.textContent = h.rec_date || "—"; tr.appendChild(td6);
+    tbody.appendChild(tr);
+  });
+  tb.appendChild(tbody);
+  hbox.appendChild(tb);
+}
+
+// ---------- Tab 切换 ----------
+function switchTab(name){
+  var stocks = name === "stocks";
+  $("tab-stocks").className = "tab" + (stocks ? " active" : "");
+  $("tab-portfolio").className = "tab" + (stocks ? "" : " active");
+  $("controls").style.display = stocks ? "flex" : "none";
+  $("tbl").style.display = stocks ? "" : "none";
+  $("watch").style.display = (stocks && WATCH_VISIBLE) ? "" : "none";
+  $("updates").style.display = stocks ? "" : "none";
+  $("portfolio").style.display = stocks ? "none" : "block";
+  try { sessionStorage.setItem("dash_tab", name); } catch(e){}
+  if (stocks) syncHeadTop();
 }
 
 function render(data){
@@ -525,6 +803,16 @@ function render(data){
   $("tbl").style.display = "";
   $("updates").style.display = "";
   syncHeadTop();
+
+  // 组合 tab（数据缺失时也渲染占位提示，tab 始终可见）
+  try { renderPortfolio(data.model_portfolio); }
+  catch(e){ $("mp-meta").textContent = "组合渲染失败：" + e.message; }
+  $("tabs").style.display = "flex";
+  $("tab-stocks").onclick = function(){ switchTab("stocks"); };
+  $("tab-portfolio").onclick = function(){ switchTab("portfolio"); };
+  var saved = null;
+  try { saved = sessionStorage.getItem("dash_tab"); } catch(e){}
+  if (saved === "portfolio") switchTab("portfolio");
 }
 
 // ---------- 引导 ----------
