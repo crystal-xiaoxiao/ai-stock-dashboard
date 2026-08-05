@@ -325,6 +325,10 @@ var COLS = [
       td.classList.add("num");
       td.appendChild(document.createTextNode(fmtMoney(s.target)));
       if (s.upside!=null){ var c=document.createElement("span"); c.className=pctClass(s.upside); c.textContent=" "+fmtPct(s.upside); td.appendChild(c); }
+      if (s.target_updated){
+        var u=document.createElement("span"); u.className="nm"; u.textContent="月更 "+s.target_updated.slice(5);
+        u.title="目标价经月度刷新（初始目标价锁定，业绩追踪不受影响）"; td.appendChild(u);
+      }
     }},
   { key:"fwd_pe", label:"PE/PEG", w:"6%", num:true, sort:function(s){return s.fwd_pe;},
     cell:function(s,td){ td.classList.add("num"); td.textContent = (s.fwd_pe==null?"—":s.fwd_pe) + " / " + (s.peg==null?"—":s.peg); }},
@@ -738,6 +742,10 @@ function renderPortfolio(mp){
     var td5 = document.createElement("td"); td5.className = "num";
     td5.appendChild(document.createTextNode(fmtMoney(h.target)));
     if (h.upside != null){ var c5 = document.createElement("span"); c5.className = pctClass(h.upside); c5.textContent = " " + fmtPct(h.upside); td5.appendChild(c5); }
+    if (h.target_updated){
+      var u5 = document.createElement("span"); u5.className = "nm"; u5.textContent = "月更 " + h.target_updated.slice(5);
+      u5.title = "目标价经月度刷新（初始目标价锁定）"; td5.appendChild(u5);
+    }
     tr.appendChild(td5);
     var td6 = document.createElement("td"); td6.textContent = h.rec_date || "—"; tr.appendChild(td6);
     tbody.appendChild(tr);
