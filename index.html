@@ -220,9 +220,9 @@ function fmtPct(x){
   var v = x*100, s = (v>=0?"+":"") + v.toFixed(1) + "%";
   return s;
 }
-function fmtMoney(x){
+function fmtMoney(x, cur){
   if (x === null || x === undefined || isNaN(x)) return "—";
-  return "$" + Number(x).toFixed(2);
+  return (cur || "$") + Number(x).toFixed(2);
 }
 function pctClass(x){ return (x>=0) ? "pos" : "neg"; }
 function isCond(s){ return ((s.tier||"").indexOf("条件") === 0); }
@@ -316,14 +316,14 @@ var COLS = [
   { key:"chg_vs_rec", label:"现价 (较荐)", w:"10%", num:true, sort:function(s){return s.chg_vs_rec;},
     cell:function(s,td){
       td.classList.add("num");
-      td.appendChild(document.createTextNode(fmtMoney(s.last_price)));
+      td.appendChild(document.createTextNode(fmtMoney(s.last_price, s.currency)));
       if (s.chg_vs_rec!=null){ var c=document.createElement("span"); c.className=pctClass(s.chg_vs_rec); c.textContent=" "+fmtPct(s.chg_vs_rec); td.appendChild(c); }
-      var sub=document.createElement("span"); sub.className="nm"; sub.textContent="荐 "+fmtMoney(s.rec_price); td.appendChild(sub);
+      var sub=document.createElement("span"); sub.className="nm"; sub.textContent="荐 "+fmtMoney(s.rec_price, s.currency); td.appendChild(sub);
     }},
   { key:"upside", label:"目标 (上行)", w:"8%", num:true, sort:function(s){return s.upside;},
     cell:function(s,td){
       td.classList.add("num");
-      td.appendChild(document.createTextNode(fmtMoney(s.target)));
+      td.appendChild(document.createTextNode(fmtMoney(s.target, s.currency)));
       if (s.upside!=null){ var c=document.createElement("span"); c.className=pctClass(s.upside); c.textContent=" "+fmtPct(s.upside); td.appendChild(c); }
       if (s.target_updated){
         var u=document.createElement("span"); u.className="nm"; u.textContent="月更 "+s.target_updated.slice(5);
@@ -338,7 +338,8 @@ var COLS = [
     cell:function(s,td){
       var z = s.buy_zone||{};
       if (z.low==null){ td.textContent="—"; return; }
-      td.appendChild(document.createTextNode("$"+z.low+"–$"+z.high));
+      var cu = s.currency||"$";
+      td.appendChild(document.createTextNode(cu+z.low+"–"+cu+z.high));
       if (z.status){
         var cls = z.status.indexOf("在买区")>=0 ? "zone-in" : (z.status.indexOf("跌破")>=0 ? "zone-below" : "zone-above");
         var st = document.createElement("span"); st.className=cls; st.style.display="block"; st.textContent=z.status;
@@ -519,7 +520,7 @@ function renderWatchlist(items){
     var bits = [];
     if (w.note) bits.push(w.note);
     if (w.last_price != null){
-      var p = "现价 $" + w.last_price;
+      var p = "现价 " + (w.currency||"$") + w.last_price;
       if (w.gap_to_trigger != null && w.gap_to_trigger > 0) p += "（距触发 +" + (w.gap_to_trigger*100).toFixed(1) + "%）";
       bits.push(p);
     }
@@ -718,8 +719,10 @@ function renderPortfolio(mp){
   var tb = document.createElement("table");
   var thead = document.createElement("thead");
   var htr = document.createElement("tr");
-  ["代码","权重","建仓","现价（较建仓）","目标（剩余空间）","推荐日"].forEach(function(h){
-    var th = document.createElement("th"); th.textContent = h; htr.appendChild(th);
+  ["代码","买入权重","建仓","现价（较建仓）","目标（剩余空间）","推荐日"].forEach(function(h){
+    var th = document.createElement("th"); th.textContent = h;
+    if (h === "买入权重") th.title = "调仓日等权设定的买入权重；周中实际权重随价格自然漂移，每周五调仓拉回等权";
+    htr.appendChild(th);
   });
   thead.appendChild(htr); tb.appendChild(thead);
   var tbody = document.createElement("tbody");
@@ -732,15 +735,15 @@ function renderPortfolio(mp){
     tr.appendChild(td1);
     var td2 = document.createElement("td"); td2.className = "num"; td2.textContent = h.weight != null ? (h.weight*100).toFixed(1)+"%" : "—"; tr.appendChild(td2);
     var td3 = document.createElement("td"); td3.className = "num";
-    td3.textContent = fmtMoney(h.entry_px);
+    td3.textContent = fmtMoney(h.entry_px, h.currency);
     if (h.entry_date){ var n3 = document.createElement("span"); n3.className = "nm"; n3.textContent = h.entry_date; td3.appendChild(n3); }
     tr.appendChild(td3);
     var td4 = document.createElement("td"); td4.className = "num";
-    td4.appendChild(document.createTextNode(fmtMoney(h.last_price)));
+    td4.appendChild(document.createTextNode(fmtMoney(h.last_price, h.currency)));
     if (h.since_entry != null){ var c4 = document.createElement("span"); c4.className = pctClass(h.since_entry); c4.textContent = " " + fmtPct(h.since_entry); td4.appendChild(c4); }
     tr.appendChild(td4);
     var td5 = document.createElement("td"); td5.className = "num";
-    td5.appendChild(document.createTextNode(fmtMoney(h.target)));
+    td5.appendChild(document.createTextNode(fmtMoney(h.target, h.currency)));
     if (h.upside != null){ var c5 = document.createElement("span"); c5.className = pctClass(h.upside); c5.textContent = " " + fmtPct(h.upside); td5.appendChild(c5); }
     if (h.target_updated){
       var u5 = document.createElement("span"); u5.className = "nm"; u5.textContent = "月更 " + h.target_updated.slice(5);
