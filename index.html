@@ -556,6 +556,11 @@ function renderPortfolio(mp){
   meta.push("策略：" + (mp.strategy||""));
   meta.push("数据截至 " + (mp.as_of||"—"));
   meta.push("上次调仓 " + (mp.last_rebalance||"—"));
+  if (mp.n_holdings != null){
+    var hold = "持仓 " + mp.n_holdings + "/15";
+    if (mp.cash_weight > 0.001) hold += " · 现金 " + (mp.cash_weight*100).toFixed(1) + "%（正预期收益标的不足 15 只，不硬凑）";
+    meta.push(hold);
+  }
   meta.push("虚线 = 回测（≤ " + mp.live_anchor + "），实线 = 实盘模拟");
   $("mp-meta").textContent = meta.join(" · ");
 
