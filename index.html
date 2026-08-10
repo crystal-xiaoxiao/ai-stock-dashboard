@@ -130,6 +130,25 @@
   @media (max-width: 560px) {
     body { font-size: 13px; }
   }
+  /* 口令输入层：替代 window.prompt（原生 prompt 无法掩码输入） */
+  #gate {
+    display: none; position: fixed; inset: 0; z-index: 50;
+    background: var(--bg); align-items: center; justify-content: center;
+  }
+  #gate form {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 22px 20px; width: min(320px, calc(100vw - 48px));
+  }
+  #gate label { display: block; font-size: 13px; color: var(--dim); margin-bottom: 10px; }
+  #gate input {
+    width: 100%; background: var(--bg); color: var(--txt); border: 1px solid var(--line);
+    border-radius: 8px; padding: 9px 12px; font-size: 14px; outline: none;
+  }
+  #gate input:focus { border-color: var(--accent); }
+  #gate button {
+    margin-top: 12px; width: 100%; background: var(--accent); color: #fff; border: 0;
+    padding: 9px 14px; border-radius: 8px; font-size: 13px; cursor: pointer;
+  }
 </style>
 </head>
 <body>
@@ -139,6 +158,14 @@
 </header>
 
 <div id="error"></div>
+
+<div id="gate">
+  <form id="gate-form">
+    <label for="gate-input">请输入看板口令</label>
+    <input id="gate-input" type="password" autocomplete="current-password">
+    <button type="submit">进入</button>
+  </form>
+</div>
 
 <div id="tabs" style="display:none">
   <div class="tab active" id="tab-stocks">📋 荐股</div>
@@ -832,6 +859,22 @@ function render(data){
 }
 
 // ---------- 引导 ----------
+// 口令输入层（掩码显示）：空提交只回焦，不能取消——没有口令看板无内容可看
+function askPassphrase(){
+  return new Promise(function(resolve){
+    var g = $("gate"), inp = $("gate-input");
+    g.style.display = "flex";
+    inp.focus();
+    $("gate-form").onsubmit = function(ev){
+      ev.preventDefault();
+      var v = inp.value;
+      if (!v){ inp.focus(); return; }
+      g.style.display = "none";
+      resolve(v);
+    };
+  });
+}
+
 async function boot(){
   window.addEventListener("resize", syncHeadTop);
   if (!window.crypto || !crypto.subtle){
@@ -840,8 +883,7 @@ async function boot(){
   }
   var pp = sessionStorage.getItem("dash_pp");
   if (!pp){
-    pp = window.prompt("请输入看板口令");
-    if (!pp){ showError("未输入口令。", true); return; }
+    pp = await askPassphrase();
     sessionStorage.setItem("dash_pp", pp);
   }
 
