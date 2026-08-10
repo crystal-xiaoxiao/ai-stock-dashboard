@@ -153,7 +153,7 @@
     <div class="mp-tip" id="mp-tip"></div>
   </div>
   <div class="mp-tiles" id="mp-tiles"></div>
-  <h2>当前持仓（每周五收盘调仓）</h2>
+  <h2>当前持仓（双周调仓 · 隔周五收盘）</h2>
   <div id="mp-holdings"></div>
 </div>
 
@@ -726,7 +726,7 @@ function renderPortfolio(mp){
   var htr = document.createElement("tr");
   ["代码","买入权重","建仓","现价（较建仓）","目标（剩余空间）","推荐日"].forEach(function(h){
     var th = document.createElement("th"); th.textContent = h;
-    if (h === "买入权重") th.title = "调仓日等权设定的买入权重；周中实际权重随价格自然漂移，每周五调仓拉回等权";
+    if (h === "买入权重") th.title = "调仓日等权设定的买入权重；调仓间实际权重随价格自然漂移，调仓日（隔周五）拉回槽位等权";
     htr.appendChild(th);
   });
   thead.appendChild(htr); tb.appendChild(thead);
