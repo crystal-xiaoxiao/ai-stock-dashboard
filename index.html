@@ -184,6 +184,8 @@
   <div id="mp-holdings"></div>
 </div>
 
+<div class="mp-meta" id="stocks-note" style="display:none; padding:8px 16px 0; margin:0">口径：全池等权 buy-and-hold，自各票推荐日起算（≠ 组合 top-15 双周调仓口径，见「📈 组合」tab）</div>
+
 <div id="controls" style="display:none">
   <select id="strategyFilter"><option value="">全部策略</option></select>
   <select id="typeFilter"><option value="">全部板块</option></select>
@@ -794,6 +796,7 @@ function switchTab(name){
   var stocks = name === "stocks";
   $("tab-stocks").className = "tab" + (stocks ? " active" : "");
   $("tab-portfolio").className = "tab" + (stocks ? "" : " active");
+  $("stocks-note").style.display = stocks ? "" : "none";
   $("controls").style.display = stocks ? "flex" : "none";
   $("tbl").style.display = stocks ? "" : "none";
   $("watch").style.display = (stocks && WATCH_VISIBLE) ? "" : "none";
@@ -842,6 +845,7 @@ function render(data){
   renderWatchlist(data.watchlist);
   renderUpdates(data.updates);
 
+  $("stocks-note").style.display = "";
   $("controls").style.display = "flex";
   $("tbl").style.display = "";
   $("updates").style.display = "";
