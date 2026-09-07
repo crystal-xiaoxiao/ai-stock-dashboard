@@ -88,6 +88,8 @@
   .hist-x { display: flex; gap: 3px; font-size: 9px; color: var(--dim); } .hist-x span { flex: 1; text-align: center; }
   .attrib-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
   @media (min-width: 900px) { .attrib-grid { grid-template-columns: 1fr 1fr; } }
+  @media (min-width: 1200px) { .attrib-grid-3 { grid-template-columns: 1fr 1fr 1fr; } }
+  .attrib-tbl h3 { margin-top: 10px; }
   .attrib-tbl { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .attrib-tbl table { table-layout: auto; min-width: 420px; }
   .attrib-tbl th { position: static; cursor: default; }
@@ -122,6 +124,7 @@
   /* ---------- Model Portfolio ---------- */
   #portfolio { display: none; padding: 12px 16px 40px; }
   #portfolio h2 { font-size: 14px; color: var(--dim); margin: 14px 0 8px; }
+  #portfolio h3 { font-size: 12px; color: var(--dim); margin: 12px 0 6px; font-weight: 600; }
   .mp-meta { color: var(--dim); font-size: 12px; margin: 2px 0 10px; line-height: 1.6; }
   .mp-chartbox { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 8px 4px; }
   .mp-legend { display: flex; flex-wrap: wrap; gap: 14px; padding: 4px 8px 8px; font-size: 12px; color: var(--dim); }
@@ -198,6 +201,9 @@
   <div class="mp-tiles" id="mp-tiles"></div>
   <h2>当前持仓（双周调仓 · 隔周五收盘）</h2>
   <div id="mp-holdings"></div>
+  <h2>收益归因（自 2026-05-01 回测起点，含回测段）</h2>
+  <div class="mp-meta" id="mp-attrib-meta"></div>
+  <div id="mp-attrib"></div>
 </div>
 
 <div class="mp-meta" id="stocks-note" style="display:none; padding:8px 16px 0; margin:0">口径：全池等权 buy-and-hold，自各票推荐日起算（≠ 组合 top-15 双周调仓口径，见「📈 组合」tab）</div>
@@ -820,6 +826,69 @@ function renderPortfolio(mp){
   });
   tb.appendChild(tbody);
   hbox.appendChild(tb);
+
+  // ---- 收益归因（数据缺失时渲染占位，不影响其余） ----
+  try { renderPortfolioAttribution(mp.attribution); }
+  catch(e){ $("mp-attrib-meta").textContent = "归因渲染失败：" + e.message; }
+}
+
+// 组合归因：贡献用 NAV 单位（百分点 pp），Σ 个股贡献 + 成本 = 组合累计收益；与 reports/attribution-portfolio.md 同一份计算
+function ppText(x){ return (x == null) ? "—" : ((x >= 0 ? "+" : "") + (x * 100).toFixed(2) + "pp"); }
+function ppCell(x){ return { text: ppText(x), cls: (x == null ? "" : pctClass(x)) }; }
+function renderPortfolioAttribution(a){
+  var box = $("mp-attrib"), meta = $("mp-attrib-meta");
+  box.textContent = "";
+  if (!a || !a.identity){ meta.textContent = "归因数据缺失（build 时该段失败或尚未生成）"; return; }
+  var idn = a.identity, cash = a.cash || {};
+  meta.textContent = a.start + " → " + a.end + "，" + a.n_periods + " 个调仓区间，在仓过 " + a.n_stocks_held +
+    " 只。贡献 = 区间期初 NAV × 槽位权重 × (腿增长−1)，逐区间相加；Σ个股贡献 + 调仓成本 = 组合累计收益。" +
+    "完整报告：reports/attribution-portfolio.md";
+  var tiles = document.createElement("div"); tiles.className = "mp-tiles"; box.appendChild(tiles);
+  makeTile(tiles, "组合累计收益", fmtPct(idn.total_return), pctClass(idn.total_return), "SPY 同期 " + fmtPct(a.spy_total_return));
+  makeTile(tiles, "个股贡献合计", ppText(idn.stock_contrib), pctClass(idn.stock_contrib),
+           "正 " + ppText(a.gross_gains) + " / 负 " + ppText(a.gross_losses));
+  makeTile(tiles, "调仓成本", ppText(idn.rebalance_costs + idn.initial_cost), "neg", "15bp/边 · 含首建仓");
+  makeTile(tiles, "平均现金权重", cash.avg_cash_weight != null ? (cash.avg_cash_weight * 100).toFixed(1) + "%" : "—", null,
+           "若持 SPY 可多 " + ppText(cash.cash_opportunity_cost_vs_spy));
+  var tw = 0; (a.winners || []).forEach(function(s){ tw += s.contrib; });
+  makeTile(tiles, "Top 5 合计", ppText(tw), pctClass(tw),
+           a.top_share_of_total != null ? "占总收益 " + Math.round(a.top_share_of_total * 100) + "%" : null);
+  var tl = 0; (a.losers || []).forEach(function(s){ tl += s.contrib; });
+  makeTile(tiles, "Bottom 5 合计", ppText(tl), pctClass(tl), null);
+
+  function stockRows(items){
+    return (items || []).map(function(s){
+      return [ { text: s.ticker, sub: (STRATEGY_META[s.strategy] ? STRATEGY_META[s.strategy].emoji + " " : "") + s.channel + " · " + s.sector },
+               ppCell(s.contrib), (s.avg_weight * 100).toFixed(1) + "%", String(s.n_periods), pctCell(s.held_return) ];
+    });
+  }
+  var heads = [ { label: "票" }, { label: "贡献", num: true, title: "对组合累计收益的贡献（NAV 单位，百分点）" },
+                { label: "平均权重", num: true }, { label: "在仓区间", num: true },
+                { label: "持有期间自身收益", num: true, title: "在仓各区间腿增长连乘 − 1（含股息）" } ];
+  var grid = document.createElement("div"); grid.className = "attrib-grid"; box.appendChild(grid);
+  var w = document.createElement("div"); w.className = "attrib-tbl"; grid.appendChild(w);
+  var h3w = document.createElement("h3"); h3w.textContent = "Top 5 winners"; w.appendChild(h3w);
+  var wt = document.createElement("div"); w.appendChild(wt); simpleTable(wt, heads, stockRows(a.winners));
+  var l = document.createElement("div"); l.className = "attrib-tbl"; grid.appendChild(l);
+  var h3l = document.createElement("h3"); h3l.textContent = "Bottom 5 losers"; l.appendChild(h3l);
+  var lt = document.createElement("div"); l.appendChild(lt); simpleTable(lt, heads, stockRows(a.losers));
+
+  var gheads = [ { label: "组" }, { label: "票数", num: true }, { label: "贡献", num: true },
+                 { label: "占总收益", num: true }, { label: "平均权重", num: true },
+                 { label: "贡献÷均重", num: true, title: "≈ 该组资金自身累计收益（近似）" } ];
+  function groupRows(rows){
+    return (rows || []).map(function(r){
+      return [ { text: r.group, sub: tickersSub(r.tickers), title: (r.tickers || []).join(", ") }, String(r.n_tickers), ppCell(r.contrib),
+               (idn.total_return > 0 ? Math.round(r.contrib / idn.total_return * 100) + "%" : "—"),
+               (r.avg_weight * 100).toFixed(1) + "%", pctCell(r.return_on_capital) ];
+    });
+  }
+  var grid2 = document.createElement("div"); grid2.className = "attrib-grid attrib-grid-3"; box.appendChild(grid2);
+  [["by_channel", "按来源渠道"], ["by_strategy", "按策略"], ["by_sector", "按板块"]].forEach(function(it){
+    var d = document.createElement("div"); d.className = "attrib-tbl"; grid2.appendChild(d);
+    var h = document.createElement("h3"); h.textContent = it[1]; d.appendChild(h);
+    var t = document.createElement("div"); d.appendChild(t); simpleTable(t, gheads, groupRows(a[it[0]]));
+  });
 }
 
 // ---------- 🔬 个股归因（全池固定分组；数字与 reports/attribution-stock-level.md 同一份计算） ----------
