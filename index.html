@@ -76,6 +76,22 @@
   #updates h2 { font-size: 14px; color: var(--dim); margin: 16px 0 8px; }
   #watch { padding: 8px 16px 0; }
   #watch h2 { font-size: 14px; color: var(--dim); margin: 16px 0 8px; }
+  /* 🔬 个股归因区块（全池固定分组，与 reports/attribution-stock-level.md 同源） */
+  #attrib { padding: 8px 16px 0; }
+  #attrib h2 { font-size: 14px; color: var(--dim); margin: 16px 0 6px; }
+  #attrib h3 { font-size: 12px; color: var(--dim); margin: 14px 0 6px; font-weight: 600; }
+  #attrib .mp-tiles { margin-top: 6px; }
+  .hist { display: flex; align-items: flex-end; gap: 3px; height: 72px; margin: 18px 0 2px; }
+  .hist .bar { flex: 1; background: var(--accent); border-radius: 3px 3px 0 0; min-height: 2px; position: relative; opacity: .85; }
+  .hist .bar.neg { background: var(--red); } .hist .bar.pos { background: var(--green); }
+  .hist .bar .n { position: absolute; top: -14px; left: 0; right: 0; text-align: center; font-size: 10px; color: var(--dim); }
+  .hist-x { display: flex; gap: 3px; font-size: 9px; color: var(--dim); } .hist-x span { flex: 1; text-align: center; }
+  .attrib-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+  @media (min-width: 900px) { .attrib-grid { grid-template-columns: 1fr 1fr; } }
+  .attrib-tbl { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .attrib-tbl table { table-layout: auto; min-width: 420px; }
+  .attrib-tbl th { position: static; cursor: default; }
+  .attrib-tbl td.num, .attrib-tbl th.num { text-align: right; font-variant-numeric: tabular-nums; }
   .wrow { display:flex; gap:8px; padding:5px 0; font-size:13px; line-height:1.5; border-bottom:1px solid rgba(128,128,128,.12); }
   .wrow .tk { font-weight:600; min-width:52px; }
   .wrow .fired { color:#e05c4b; font-weight:600; }
@@ -189,6 +205,7 @@
 <div id="controls" style="display:none">
   <select id="strategyFilter"><option value="">全部策略</option></select>
   <select id="typeFilter"><option value="">全部板块</option></select>
+  <select id="channelFilter" title="来源渠道：推荐日归因（推荐日及前 7 天的 sourcing 路由渠道，否则「自筛」）"><option value="">全部渠道</option></select>
   <select id="dateFilter">
     <option value="">全部时间</option>
     <option value="7">最近 7 天</option>
@@ -205,6 +222,21 @@
   <tbody id="body"></tbody>
   <tfoot id="foot"></tfoot>
 </table></div>
+
+<div id="attrib" style="display:none">
+  <h2>🔬 个股归因</h2>
+  <div class="mp-meta" id="attrib-meta"></div>
+  <h3>① 收益离散度（正式推荐，推荐日至今）</h3>
+  <div class="mp-tiles" id="attrib-tiles"></div>
+  <div id="attrib-hist"></div>
+  <h3>② 来源渠道（推荐日归因）</h3>
+  <div class="attrib-tbl" id="attrib-channel"></div>
+  <h3>③ 时间窗：按推荐月 cohort ／ 按日历月已入池票当月收益（* = 未完整月）</h3>
+  <div class="attrib-grid">
+    <div class="attrib-tbl" id="attrib-cohort"></div>
+    <div class="attrib-tbl" id="attrib-calendar"></div>
+  </div>
+</div>
 
 <div id="watch" style="display:none">
   <h2>👀 观察名单（触发价/时点到位自动复评）</h2>
@@ -405,15 +437,20 @@ function buildHead(){
   });
 }
 
+// 来源渠道：档案缺「来源渠道」行 -> 「未标注」（回填后不应出现）
+function channelOf(s){ return s.source_channel || "未标注"; }
+
 function currentRows(){
   var t = $("typeFilter").value;
   var st = $("strategyFilter").value;
+  var ch = $("channelFilter").value;
   var dr = $("dateFilter").value;
   var q = ($("search").value||"").trim().toLowerCase();
   var col = COLS.filter(function(c){return c.key===sortKey;})[0] || COLS[0];
   var rows = STOCKS.filter(function(s){
     if (st && (s.strategy||"") !== st) return false;
     if (t && (s.sector||s.type) !== t) return false;
+    if (ch && channelOf(s) !== ch) return false;
     if (dr){
       // 与「持有 N 天」同口径（锚定 data_as_of 而非浏览器本地日期）；无推荐日的行不算「最近」
       var dd = daysSinceRec(s.rec_date);
@@ -729,13 +766,7 @@ function renderPortfolio(mp){
   tiles.textContent = "";
   var mFull = (mp.metrics||{}).full || {};
   var mLive = (mp.metrics||{}).live;
-  function tile(label, val, cls, sub){
-    var d = document.createElement("div"); d.className = "mp-tile";
-    var l = document.createElement("div"); l.className = "lbl"; l.textContent = label; d.appendChild(l);
-    var v = document.createElement("div"); v.className = "val" + (cls ? " "+cls : ""); v.textContent = val; d.appendChild(v);
-    if (sub){ var s = document.createElement("div"); s.className = "sub"; s.textContent = sub; d.appendChild(s); }
-    tiles.appendChild(d);
-  }
+  function tile(label, val, cls, sub){ makeTile(tiles, label, val, cls, sub); }
   function liveSub(pick){
     return (mLive && pick(mLive) != null) ? "实盘段 " + pick(mLive) : null;
   }
@@ -791,6 +822,118 @@ function renderPortfolio(mp){
   hbox.appendChild(tb);
 }
 
+// ---------- 🔬 个股归因（全池固定分组；数字与 reports/attribution-stock-level.md 同一份计算） ----------
+// KPI 卡（组合 tab 与归因区块共用）
+function makeTile(container, label, val, cls, sub){
+  var d = document.createElement("div"); d.className = "mp-tile";
+  var l = document.createElement("div"); l.className = "lbl"; l.textContent = label; d.appendChild(l);
+  var v = document.createElement("div"); v.className = "val" + (cls ? " "+cls : ""); v.textContent = val; d.appendChild(v);
+  if (sub){ var s = document.createElement("div"); s.className = "sub"; s.textContent = sub; d.appendChild(s); }
+  container.appendChild(d);
+}
+function pctOrDash(x){ return (x == null) ? "—" : fmtPct(x); }
+function wrText(x){ return (x == null) ? "—" : Math.round(x * 100) + "%"; }
+function pctCell(x){ return { text: pctOrDash(x), cls: (x == null ? "" : pctClass(x)) }; }
+// 小表：heads = [{label, num, title}]；cell = 字符串 或 {text, cls, sub, title}
+function simpleTable(container, heads, rows){
+  container.textContent = "";
+  var tb = document.createElement("table"), thead = document.createElement("thead"), tr = document.createElement("tr");
+  heads.forEach(function(h){
+    var th = document.createElement("th"); th.textContent = h.label;
+    if (h.num) th.className = "num"; if (h.title) th.title = h.title;
+    tr.appendChild(th);
+  });
+  thead.appendChild(tr); tb.appendChild(thead);
+  var tbody = document.createElement("tbody");
+  rows.forEach(function(r){
+    var trr = document.createElement("tr");
+    r.forEach(function(c, i){
+      var td = document.createElement("td"); if (heads[i].num) td.className = "num";
+      if (c && typeof c === "object"){
+        var sp = document.createElement("span"); if (c.cls) sp.className = c.cls; sp.textContent = c.text; td.appendChild(sp);
+        if (c.sub){ var s = document.createElement("span"); s.className = "nm"; s.textContent = c.sub; td.appendChild(s); }
+        if (c.title) td.title = c.title;
+      } else td.textContent = (c == null ? "—" : c);
+      trr.appendChild(td);
+    });
+    tbody.appendChild(trr);
+  });
+  tb.appendChild(tbody); container.appendChild(tb);
+}
+function tickersSub(tk){
+  tk = tk || [];
+  return tk.length > 8 ? tk.slice(0, 8).join(" ") + " …+" + (tk.length - 8) : tk.join(" ");
+}
+function renderAttribution(a){
+  ["attrib-tiles","attrib-hist","attrib-channel","attrib-cohort","attrib-calendar"].forEach(function(id){ $(id).textContent = ""; });
+  var meta = $("attrib-meta");
+  if (!a || !a.dispersion){ meta.textContent = "归因数据缺失（build 时该段失败或尚未生成）"; return; }
+  var blk = a.dispersion["全部正式"] || {}, st = blk.stats || {}, ci = blk.ci95_mean;
+  meta.textContent = "口径同底部「平均」行：正式推荐 " + a.n_formal + " 只等权 buy-and-hold（条件推荐 " + a.n_cond +
+    " 只不入均值）；全池固定分组，不随上方筛选联动；截至 " + (a.as_of || "—") + "。完整报告：reports/attribution-stock-level.md";
+
+  // ① 离散度：6 张 KPI 卡 + CSS 直方图（10 个百分点分箱）
+  var tiles = $("attrib-tiles");
+  makeTile(tiles, "正式推荐 n", String(st.n == null ? "—" : st.n), null, "含 VC 观察级");
+  makeTile(tiles, "均值", pctOrDash(st.mean), st.mean != null ? pctClass(st.mean) : null,
+           ci ? ("95% CI " + pctOrDash(ci.lo) + " ~ " + pctOrDash(ci.hi)) : "样本不足，无 CI");
+  makeTile(tiles, "中位", pctOrDash(st.median), st.median != null ? pctClass(st.median) : null,
+           "SPY 同期均值 " + pctOrDash(a.spy_mean_same_window));
+  makeTile(tiles, "标准差", pctOrDash(st.std), null, "IQR " + pctOrDash(st.iqr));
+  makeTile(tiles, "P10 – P90", pctOrDash(st.p10) + " ~ " + pctOrDash(st.p90), null,
+           "极值 " + pctOrDash(st.min) + " / " + pctOrDash(st.max));
+  makeTile(tiles, "胜率", wrText(st.win_rate), null,
+           "盈/亏均 " + pctOrDash(st.avg_win) + " / " + pctOrDash(st.avg_loss) + (st.payoff != null ? "，payoff " + st.payoff.toFixed(2) : ""));
+  var hist = blk.hist || [], hbox = $("attrib-hist");
+  if (hist.length){
+    var maxN = 0; hist.forEach(function(b){ if (b.n > maxN) maxN = b.n; });
+    var bars = document.createElement("div"); bars.className = "hist";
+    var xs = document.createElement("div"); xs.className = "hist-x";
+    hist.forEach(function(b){
+      var bar = document.createElement("div");
+      bar.className = "bar " + (b.hi <= 0 ? "neg" : (b.lo >= 0 ? "pos" : ""));
+      bar.style.height = (maxN ? Math.max(2, Math.round(b.n / maxN * 100)) : 2) + "%";
+      bar.title = fmtPct(b.lo) + " ~ " + fmtPct(b.hi) + "：" + b.n + " 只";
+      if (b.n){ var n = document.createElement("span"); n.className = "n"; n.textContent = b.n; bar.appendChild(n); }
+      bars.appendChild(bar);
+      var lab = document.createElement("span"); lab.textContent = Math.round(b.lo * 100) + "%"; xs.appendChild(lab);
+    });
+    hbox.appendChild(bars); hbox.appendChild(xs);
+  }
+
+  // ② 渠道（推荐日归因）+ 另类渠道合计行
+  var chRows = (a.by_channel || []).map(function(r){
+    return [ { text: r.group + (r.small_sample ? " ⚠" : ""), sub: tickersSub(r.tickers), title: (r.tickers || []).join(", ") },
+             String(r.n), pctCell(r.mean), pctCell(r.median), wrText(r.win_rate), pctCell(r.mean_excess),
+             { text: pctOrDash(r["mean_r_T+4w"]), cls: r["mean_r_T+4w"] == null ? "" : pctClass(r["mean_r_T+4w"]),
+               sub: (r["n_r_T+4w"] != null && r["n_r_T+4w"] !== r.n) ? ("n=" + r["n_r_T+4w"]) : null } ];
+  });
+  (a.self_vs_alt || []).forEach(function(r){
+    if (r.group === "自筛") return;
+    chRows.push([ { text: "▸ " + r.group + "合计", sub: tickersSub(r.tickers), title: (r.tickers || []).join(", ") },
+                  String(r.n), pctCell(r.mean), pctCell(r.median), wrText(r.win_rate), pctCell(r.mean_excess), pctCell(r["mean_r_T+4w"]) ]);
+  });
+  simpleTable($("attrib-channel"), [
+    { label: "渠道", title: "推荐日归因：推荐日及前 7 天内 sourcing 候选渠道，否则「自筛」。⚠ = n<3 样本不足。另类渠道票全部是 7 月后推荐的，与自筛比较含 cohort 混淆，同期限看 T+4w 列" },
+    { label: "n", num: true }, { label: "均值", num: true }, { label: "中位", num: true }, { label: "胜率", num: true },
+    { label: "超额 vs SPY", num: true }, { label: "T+4w 均值", num: true, title: "固定持有 20 个交易日，去掉持有期长短的混淆" }
+  ], chRows);
+
+  // ③ 时间窗
+  simpleTable($("attrib-cohort"), [
+    { label: "推荐月", title: "该月推荐的正式票，至今等权均值" }, { label: "n", num: true }, { label: "均值", num: true },
+    { label: "胜率", num: true }, { label: "超额 vs SPY", num: true }, { label: "T+4w", num: true }
+  ], (a.by_rec_month || []).map(function(r){
+    return [ r.group + (r.small_sample ? " ⚠" : ""), String(r.n), pctCell(r.mean), wrText(r.win_rate), pctCell(r.mean_excess), pctCell(r["mean_r_T+4w"]) ];
+  }));
+  simpleTable($("attrib-calendar"), [
+    { label: "日历月", title: "成员 = 推荐日 ≤ 上月末的正式票（当月新入池的下月才计），等权当月区间收益" },
+    { label: "池 n", num: true }, { label: "池当月", num: true }, { label: "SPY 当月", num: true }, { label: "超额", num: true }, { label: "月内胜率", num: true }
+  ], (a.by_calendar_month || []).map(function(r){
+    return [ r.month + (r.partial ? "*" : ""), String(r.n), pctCell(r.pool_ret), pctCell(r.spy_ret), pctCell(r.excess), wrText(r.win_rate) ];
+  }));
+}
+
 // ---------- Tab 切换 ----------
 function switchTab(name){
   var stocks = name === "stocks";
@@ -799,6 +942,7 @@ function switchTab(name){
   $("stocks-note").style.display = stocks ? "" : "none";
   $("controls").style.display = stocks ? "flex" : "none";
   $("tbl").style.display = stocks ? "" : "none";
+  $("attrib").style.display = stocks ? "" : "none";
   $("watch").style.display = (stocks && WATCH_VISIBLE) ? "" : "none";
   $("updates").style.display = stocks ? "" : "none";
   $("portfolio").style.display = stocks ? "none" : "block";
@@ -838,16 +982,30 @@ function render(data){
       stSel.appendChild(o);
     });
   stSel.onchange = renderBody;
+  // 渠道下拉（自筛在前，其余按票数降序；只列实际存在的）
+  var chCount = {}; STOCKS.forEach(function(s){ var c = channelOf(s); chCount[c] = (chCount[c] || 0) + 1; });
+  var chSel = $("channelFilter");
+  Object.keys(chCount).sort(function(x, y){
+    if (x === "自筛") return -1; if (y === "自筛") return 1;
+    return (chCount[y] - chCount[x]) || x.localeCompare(y);
+  }).forEach(function(c){
+    var o = document.createElement("option"); o.value = c; o.textContent = c + " (" + chCount[c] + ")"; chSel.appendChild(o);
+  });
+  chSel.onchange = renderBody;
   $("dateFilter").onchange = renderBody;
   $("search").oninput = renderBody;
 
   buildHead(); renderBody();
   renderWatchlist(data.watchlist);
   renderUpdates(data.updates);
+  // 归因区块（数据缺失时渲染占位，不影响其余）
+  try { renderAttribution(data.attribution); }
+  catch(e){ $("attrib-meta").textContent = "归因渲染失败：" + e.message; }
 
   $("stocks-note").style.display = "";
   $("controls").style.display = "flex";
   $("tbl").style.display = "";
+  $("attrib").style.display = "";
   $("updates").style.display = "";
   syncHeadTop();
 
