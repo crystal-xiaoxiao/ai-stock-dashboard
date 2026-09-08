@@ -112,6 +112,8 @@
   .b-falsification { background: #4a1620; color: #ff9aa8; }
   .b-influencer_pick { background: #2a1f3d; color: #cda8ff; }
   .b-cross_lane { background: #123a3a; color: #7fe0d8; }
+  .b-freeze, .b-stop_loss { background: #4a1620; color: #ff9aa8; }
+  .b-unfreeze { background: #14402a; color: #7ff0b0; }
   .b-dev_news { background: #232a38; color: #aab6cc; }
   /* ---------- Tab 导航 ---------- */
   #tabs { display: flex; gap: 6px; padding: 10px 16px 0; border-bottom: 1px solid var(--line); }
@@ -552,7 +554,7 @@ function renderFoot(rows){
 function renderUpdates(updates){
   var feed = $("feed");
   feed.textContent = "";
-  var labels = { new_rec:"新荐", buy_alert:"买点", milestone:"里程碑", falsification:"证伪", influencer_pick:"KOL荐", cross_lane:"交叉背书", dev_news:"动态" };
+  var labels = { new_rec:"新荐", buy_alert:"买点", milestone:"里程碑", falsification:"证伪", influencer_pick:"KOL荐", cross_lane:"交叉背书", freeze:"冻结", unfreeze:"解冻", stop_loss:"止损", dev_news:"动态" };
   (updates||[]).forEach(function(u){
     var row = document.createElement("div"); row.className="upd";
     var d = document.createElement("span"); d.className="d"; d.textContent = u.date||""; row.appendChild(d);
