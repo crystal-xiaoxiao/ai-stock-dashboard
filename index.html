@@ -636,13 +636,16 @@ function renderPortfolio(mp){
   if (liveHold){
     meta.push("上次实盘调仓 " + (real.last_rebalance||"—"));
     var lh = "实盘持仓 " + real.holdings.length + " 只";
-    if (real.cash_weight != null) lh += " · 现金 " + (real.cash_weight*100).toFixed(1) + "%";
+    if (real.cash_weight != null){
+      lh += " · 现金 " + (real.cash_weight*100).toFixed(1) + "%";
+      if (real.cash_weight > 0.05) lh += "（够格标的不足 15 只时空槽留现金：剩余上行年化须 ≥5%）";
+    }
     meta.push(lh);
   } else {
     meta.push("上次调仓 " + (mp.last_rebalance||"—"));
     if (mp.n_holdings != null){
       var hold = "持仓 " + mp.n_holdings + "/15";
-      if (mp.cash_weight > 0.001) hold += " · 现金 " + (mp.cash_weight*100).toFixed(1) + "%（正预期收益标的不足 15 只，不硬凑）";
+      if (mp.cash_weight > 0.001) hold += " · 现金 " + (mp.cash_weight*100).toFixed(1) + "%（够格标的不足 15 只，不硬凑：剩余上行年化须 ≥5%）";
       meta.push(hold);
     }
   }
