@@ -201,9 +201,9 @@
     <div class="mp-tip" id="mp-tip"></div>
   </div>
   <div class="mp-tiles" id="mp-tiles"></div>
-  <h2>当前持仓（双周调仓 · 隔周五收盘）</h2>
+  <h2>模拟组合当前持仓（双周调仓 · 隔周五收盘；真实盘只做美股，持仓会有出入）</h2>
   <div id="mp-holdings"></div>
-  <h2>收益归因（自 2026-05-01 回测起点，含回测段）</h2>
+  <h2>收益归因（模拟组合口径，自 2026-05-01 起，含追溯模拟段）</h2>
   <div class="mp-meta" id="mp-attrib-meta"></div>
   <div id="mp-attrib"></div>
 </div>
@@ -635,7 +635,28 @@ function renderPortfolio(mp){
     if (mp.cash_weight > 0.001) hold += " · 现金 " + (mp.cash_weight*100).toFixed(1) + "%（正预期收益标的不足 15 只，不硬凑）";
     meta.push(hold);
   }
-  meta.push("虚线 = 回测（≤ " + mp.live_anchor + "），实线 = 实盘模拟");
+  // 虚线段叫「追溯模拟」而不叫「回测」（2026-11-18 Crystal 定）：这段的荐股是 5 月起当时实时给出的，
+  // 不是拿今天的策略回头去历史里选股；事后的只有组合规则（选前 15、双周调仓等，8 月定版后回头套用）。
+  var RETRO_NOTE = "荐股为当时实时给出，组合规则事后定版、回头套用";
+  // 真实盘段（IB 实际成交重建；数据缺失时退回两段显示）
+  var real =(mp.real && mp.real.nav_series && mp.real.nav_series.length > 1) ? mp.real : null;
+  if (real){
+    meta.push("蓝虚线 = 追溯模拟（≤ " + mp.live_anchor + "：" + RETRO_NOTE + "），蓝实线 = 实盘模拟，橙线 = 真实盘（自 " + real.start +
+              "，按 IB 实际成交逐日重建：只做美股、含调仓延后、实际成交价与佣金）");
+    var rbs = real.rebalances || [];
+    var rbDone = rbs.filter(function(r){ return r.executed; }).length;
+    var rbOff = rbs.filter(function(r){ return r.status !== "on_time" && r.status !== "pending"; });
+    var rbTxt = "真实盘调仓 " + rbDone + " 次";
+    if (rbOff.length) rbTxt += "，其中 " + rbOff.length + " 次没在计划日执行（" + rbOff.map(function(r){
+      return r.scheduled.slice(5) + (r.executed ? " → " + r.executed.slice(5) : (r.status === "missed" ? " 错过" : " 待补"));
+    }).join("、") + "）";
+    meta.push(rbTxt);
+    if ((real.skipped_foreign||[]).length) meta.push("非美股不进真实盘：" + real.skipped_foreign.join("、"));
+    if (real.check && real.check.max_dev != null && real.check.max_dev > 0.03)
+      meta.push("⚠ 重建净值与账户净值核对偏差 " + (real.check.max_dev*100).toFixed(1) + "%，可能缺成交记录");
+  } else {
+    meta.push("虚线 = 追溯模拟（≤ " + mp.live_anchor + "：" + RETRO_NOTE + "），实线 = 实盘模拟");
+  }
   $("mp-meta").textContent = meta.join(" · ");
 
   // ---- 数据准备（统一转成 {t(ms), v(指数=100)}）----
@@ -651,10 +672,13 @@ function renderPortfolio(mp){
   var spy = toPts((mp.benchmarks||{}).SPY);
   var qqq = toPts((mp.benchmarks||{}).QQQ);
   var anchorT = parseYMD(mp.live_anchor).getTime();
+  var realPts = real ? toPts(real.nav_series) : [];                 // 首点 = 接续点（模拟净值）
+  var realT = real ? parseYMD(real.anchor).getTime() : null;        // 接续点之后主曲线 = 真实盘
+  var C_SIM = "#3987e5", C_REAL = "#d95926", C_SURFACE = "#171a21"; // 蓝=模拟组合，橙=真实盘（深色面板上已过色觉校验）
 
-  // ---- 比例尺 ----
-  var W = 820, H = 300, L = 44, R = 12, T = 12, B = 24;
-  var allPts = port.concat(spy).concat(qqq);
+  // ---- 比例尺 ----（有真实盘时右侧留出线尾标签的位置）
+  var W = 820, H = 300, L = 44, R = real ? 50 : 12, T = 12, B = 24;
+  var allPts = port.concat(spy).concat(qqq).concat(realPts);
   var tMin = Infinity, tMax = -Infinity, vMin = Infinity, vMax = -Infinity;
   allPts.forEach(function(p){
     if (p.t < tMin) tMin = p.t; if (p.t > tMax) tMax = p.t;
@@ -691,27 +715,50 @@ function renderPortfolio(mp){
     xl.textContent = near.date.slice(5);
     svg.appendChild(xl);
   }
-  // 回测/实盘分界线
-  if (anchorT > tMin && anchorT < tMax){
-    svg.appendChild(svgEl("line", { x1:X(anchorT), y1:T, x2:X(anchorT), y2:H-B, stroke:"#3a4152", "stroke-width":1, "stroke-dasharray":"3 3" }));
+  // 分界线：追溯模拟 | 实盘模拟 | 真实盘
+  function divider(t, text){
+    if (!(t > tMin && t < tMax)) return;
+    svg.appendChild(svgEl("line", { x1:X(t), y1:T, x2:X(t), y2:H-B, stroke:"#3a4152", "stroke-width":1, "stroke-dasharray":"3 3" }));
     // 分界线贴近右缘时标签放到线左侧，避免被裁切
-    var onRight = X(anchorT) < (W - R) * 0.8;
-    var bl = svgEl("text", { x:X(anchorT) + (onRight ? 4 : -4), y:T+10, fill:"#8a93a6", "font-size":10,
+    var onRight = X(t) < (W - R) * 0.8;
+    var bl = svgEl("text", { x:X(t) + (onRight ? 4 : -4), y:T+10, fill:"#8a93a6", "font-size":10,
                              "text-anchor": onRight ? "start" : "end" });
-    bl.textContent = onRight ? "▶ 实盘模拟" : "实盘模拟 ▶";
+    bl.textContent = onRight ? "▶ " + text : text + " ▶";
     svg.appendChild(bl);
   }
+  divider(anchorT, "实盘模拟");
+  if (real) divider(realT, "真实盘");
   // 基准线（中性灰，线型区分）
   if (spy.length) svg.appendChild(svgEl("path", { d:path(spy), fill:"none", stroke:"#898781", "stroke-width":1.5 }));
   if (qqq.length) svg.appendChild(svgEl("path", { d:path(qqq), fill:"none", stroke:"#898781", "stroke-width":1.5, "stroke-dasharray":"2 4", "stroke-linecap":"round" }));
-  // 组合：虚线回测段 + 实线实盘段（共享 anchor 点）
+  // 模拟组合（蓝）：虚线追溯模拟段 + 实线实盘模拟段；真实盘开始后退为细线，只作同期对照
   var back = port.filter(function(p){ return p.t <= anchorT; });
-  var live = port.filter(function(p){ return p.t >= anchorT; });
-  if (back.length) svg.appendChild(svgEl("path", { d:path(back), fill:"none", stroke:"#3987e5", "stroke-width":2.4, "stroke-dasharray":"7 5", "stroke-linecap":"round" }));
-  if (live.length > 1) svg.appendChild(svgEl("path", { d:path(live), fill:"none", stroke:"#3987e5", "stroke-width":2.6, "stroke-linecap":"round" }));
-  // 末点标记
+  var live = port.filter(function(p){ return p.t >= anchorT && (realT == null || p.t <= realT); });
+  var simAfter = real ? port.filter(function(p){ return p.t >= realT; }) : [];
+  if (simAfter.length > 1) svg.appendChild(svgEl("path", { d:path(simAfter), fill:"none", stroke:C_SIM, "stroke-width":1.5, "stroke-opacity":0.6, "stroke-linecap":"round", "stroke-linejoin":"round" }));
+  if (back.length) svg.appendChild(svgEl("path", { d:path(back), fill:"none", stroke:C_SIM, "stroke-width":2.4, "stroke-dasharray":"7 5", "stroke-linecap":"round" }));
+  if (live.length > 1) svg.appendChild(svgEl("path", { d:path(live), fill:"none", stroke:C_SIM, "stroke-width":2.6, "stroke-linecap":"round" }));
+  // 真实盘（橙）：从接续点接着模拟净值往下画，是这之后的主曲线
+  if (realPts.length > 1) svg.appendChild(svgEl("path", { d:path(realPts), fill:"none", stroke:C_REAL, "stroke-width":2.6, "stroke-linecap":"round", "stroke-linejoin":"round" }));
+  // 末点标记（+ 有真实盘时两条线各带一个线尾标签，不只靠颜色区分）
   var lastP = port[port.length-1];
-  svg.appendChild(svgEl("circle", { cx:X(lastP.t), cy:Y(lastP.v), r:3.5, fill:"#3987e5" }));
+  if (real){
+    var lastR = realPts[realPts.length-1];
+    svg.appendChild(svgEl("circle", { cx:X(lastP.t), cy:Y(lastP.v), r:3, fill:C_SIM, "fill-opacity":0.6 }));
+    svg.appendChild(svgEl("circle", { cx:X(lastR.t), cy:Y(lastR.v), r:4.5, fill:C_REAL, stroke:C_SURFACE, "stroke-width":2 }));
+    var yR = Y(lastR.v), yS = Y(lastP.v);
+    if (Math.abs(yR - yS) < 12){                       // 两个标签挤在一起时上下错开
+      var mid = (yR + yS) / 2, up = yR <= yS;
+      yR = mid + (up ? -6 : 6); yS = mid + (up ? 6 : -6);
+    }
+    [[lastR, yR, "真实盘", "#e6e9ef"], [lastP, yS, "模拟", "#8a93a6"]].forEach(function(it){
+      var tx = svgEl("text", { x:X(it[0].t) + 9, y:it[1] + 3.5, fill:it[3], "font-size":10 });
+      tx.textContent = it[2];
+      svg.appendChild(tx);
+    });
+  } else {
+    svg.appendChild(svgEl("circle", { cx:X(lastP.t), cy:Y(lastP.v), r:3.5, fill:C_SIM }));
+  }
 
   // ---- hover 十字线 + tooltip ----
   var cross = svgEl("line", { x1:0, y1:T, x2:0, y2:H-B, stroke:"#8a93a6", "stroke-width":1, "stroke-dasharray":"2 2", visibility:"hidden" });
@@ -736,8 +783,15 @@ function renderPortfolio(mp){
     var p = port[nearestIdx(t)];
     cross.setAttribute("x1", X(p.t)); cross.setAttribute("x2", X(p.t));
     cross.setAttribute("visibility", "visible");
-    var rows = ['<span class="d">' + p.date + (p.t <= anchorT ? " · 回测" : " · 实盘模拟") + "</span>"];
-    rows.push("组合 <b>" + fmtPct(p.v/100 - 1) + "</b>");
+    var rv = (real && p.t > realT) ? lookup(realPts, p.date) : null;
+    var seg = p.t <= anchorT ? " · 追溯模拟" : (rv != null ? " · 真实盘" : " · 实盘模拟");
+    var rows = ['<span class="d">' + p.date + seg + "</span>"];
+    if (rv != null){
+      rows.push("真实盘 <b>" + fmtPct(rv/100 - 1) + "</b>");
+      rows.push("模拟（同期对照） " + fmtPct(p.v/100 - 1));
+    } else {
+      rows.push("组合 <b>" + fmtPct(p.v/100 - 1) + "</b>");
+    }
     var sv = lookup(spy, p.date); if (sv != null) rows.push("SPY " + fmtPct(sv/100 - 1));
     var qv = lookup(qqq, p.date); if (qv != null) rows.push("QQQ " + fmtPct(qv/100 - 1));
     tip.innerHTML = rows.join("<br>");
@@ -761,7 +815,10 @@ function renderPortfolio(mp){
   // ---- 图例 ----
   var lg = $("mp-legend");
   lg.textContent = "";
-  [["#3987e5","solid","组合（虚=回测 实=模拟）"],["#898781","solid","SPY"],["#898781","dotted","QQQ"]].forEach(function(it){
+  var legendItems = real
+    ? [[C_SIM,"dashed","模拟组合（虚=追溯模拟，实=实盘模拟；真实盘开始后为细线对照）"],[C_REAL,"solid","真实盘（IB 实际成交）"],["#898781","solid","SPY"],["#898781","dotted","QQQ"]]
+    : [[C_SIM,"solid","组合（虚=追溯模拟 实=实盘模拟）"],["#898781","solid","SPY"],["#898781","dotted","QQQ"]];
+  legendItems.forEach(function(it){
     var s = document.createElement("span");
     var sw = document.createElement("span"); sw.className = "sw";
     sw.style.borderTopColor = it[0]; sw.style.borderTopStyle = it[1];
@@ -772,14 +829,19 @@ function renderPortfolio(mp){
   // ---- 指标卡 ----
   var tiles = $("mp-tiles");
   tiles.textContent = "";
-  var mFull = (mp.metrics||{}).full || {};
+  // 有真实盘时，指标卡跟主曲线走：全期 = 追溯模拟 → 实盘模拟 → 真实盘 接起来的那条（metrics.display）
+  var mFull = (real && (mp.metrics||{}).display) || (mp.metrics||{}).full || {};
   var mLive = (mp.metrics||{}).live;
+  var mReal = real ? real.metrics : null;
   function tile(label, val, cls, sub){ makeTile(tiles, label, val, cls, sub); }
   function liveSub(pick){
+    if (mReal && pick(mReal) != null) return "真实盘 " + pick(mReal);
     return (mLive && pick(mLive) != null) ? "实盘段 " + pick(mLive) : null;
   }
   function cls(x){ return x != null ? pctClass(x) : null; }
-  tile("累计收益（全期）", fmtPct(mFull.cum), cls(mFull.cum), liveSub(function(m){ return fmtPct(m.cum); }));
+  var cumSub = liveSub(function(m){ return fmtPct(m.cum); });
+  if (mReal && cumSub && real.sim_cum != null) cumSub += " · 同期模拟 " + fmtPct(real.sim_cum);
+  tile("累计收益（全期）", fmtPct(mFull.cum), cls(mFull.cum), cumSub);
   tile("年化", fmtPct(mFull.ann), cls(mFull.ann), "样本短，仅供参考");
   tile("最大回撤", mFull.max_dd != null ? "-" + (mFull.max_dd*100).toFixed(1) + "%" : "—", mFull.max_dd != null ? "neg" : null, null);
   tile("周胜率", mFull.win != null ? (mFull.win*100).toFixed(0) + "%" : "—", null, mFull.n_periods != null ? mFull.n_periods + " 个区间" : null);
