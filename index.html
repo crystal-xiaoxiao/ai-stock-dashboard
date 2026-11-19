@@ -201,7 +201,7 @@
     <div class="mp-tip" id="mp-tip"></div>
   </div>
   <div class="mp-tiles" id="mp-tiles"></div>
-  <h2>模拟组合当前持仓（双周调仓 · 隔周五收盘；真实盘只做美股，持仓会有出入）</h2>
+  <h2 id="mp-holdings-title">当前持仓</h2>
   <div id="mp-holdings"></div>
   <h2>收益归因（模拟组合口径，自 2026-05-01 起，含追溯模拟段）</h2>
   <div class="mp-meta" id="mp-attrib-meta"></div>
@@ -627,19 +627,28 @@ function renderPortfolio(mp){
   }
   // ---- meta 行 ----
   var meta = [];
+  // 真实盘段（IB 实际成交重建；数据缺失时退回两段显示、持仓表退回模拟组合）
+  var real = (mp.real && mp.real.nav_series && mp.real.nav_series.length > 1) ? mp.real : null;
+  // 当前持仓 2026-11-18 起显示 IB 实盘账户（Crystal 定），不再显示模拟组合
+  var liveHold = !!(real && real.holdings && real.holdings.length);
   meta.push("策略：" + (mp.strategy||""));
   meta.push("数据截至 " + (mp.as_of||"—"));
-  meta.push("上次调仓 " + (mp.last_rebalance||"—"));
-  if (mp.n_holdings != null){
-    var hold = "持仓 " + mp.n_holdings + "/15";
-    if (mp.cash_weight > 0.001) hold += " · 现金 " + (mp.cash_weight*100).toFixed(1) + "%（正预期收益标的不足 15 只，不硬凑）";
-    meta.push(hold);
+  if (liveHold){
+    meta.push("上次实盘调仓 " + (real.last_rebalance||"—"));
+    var lh = "实盘持仓 " + real.holdings.length + " 只";
+    if (real.cash_weight != null) lh += " · 现金 " + (real.cash_weight*100).toFixed(1) + "%";
+    meta.push(lh);
+  } else {
+    meta.push("上次调仓 " + (mp.last_rebalance||"—"));
+    if (mp.n_holdings != null){
+      var hold = "持仓 " + mp.n_holdings + "/15";
+      if (mp.cash_weight > 0.001) hold += " · 现金 " + (mp.cash_weight*100).toFixed(1) + "%（正预期收益标的不足 15 只，不硬凑）";
+      meta.push(hold);
+    }
   }
   // 虚线段叫「追溯模拟」而不叫「回测」（2026-11-18 Crystal 定）：这段的荐股是 5 月起当时实时给出的，
   // 不是拿今天的策略回头去历史里选股；事后的只有组合规则（选前 15、双周调仓等，8 月定版后回头套用）。
   var RETRO_NOTE = "荐股为当时实时给出，组合规则事后定版、回头套用";
-  // 真实盘段（IB 实际成交重建；数据缺失时退回两段显示）
-  var real =(mp.real && mp.real.nav_series && mp.real.nav_series.length > 1) ? mp.real : null;
   if (real){
     meta.push("蓝虚线 = 追溯模拟（≤ " + mp.live_anchor + "：" + RETRO_NOTE + "），蓝实线 = 实盘模拟，橙线 = 真实盘（自 " + real.start +
               "，按 IB 实际成交逐日重建：只做美股、含调仓延后、实际成交价与佣金）");
@@ -848,20 +857,29 @@ function renderPortfolio(mp){
   tile("Sharpe（年化）", mFull.sharpe != null ? mFull.sharpe.toFixed(2) : "—", null, "rf=" + (mp.rf_annual_pct != null ? mp.rf_annual_pct + "%" : "—"));
   tile("超额 vs SPY", fmtPct(mFull.excess_spy), cls(mFull.excess_spy), liveSub(function(m){ return fmtPct(m.excess_spy); }));
 
-  // ---- 持仓明细 ----
+  // ---- 持仓明细（有实盘数据时显示 IB 实盘账户，否则退回模拟组合）----
+  $("mp-holdings-title").textContent = liveHold
+    ? "当前持仓（IB 实盘账户 · 截至 " + real.as_of + " 收盘，按成交记录重建）"
+    : "模拟组合当前持仓（双周调仓 · 隔周五收盘）";
   var hbox = $("mp-holdings");
   hbox.textContent = "";
   var tb = document.createElement("table");
   var thead = document.createElement("thead");
   var htr = document.createElement("tr");
-  ["代码","买入权重","建仓","现价（较建仓）","目标（剩余空间）","推荐日"].forEach(function(h){
-    var th = document.createElement("th"); th.textContent = h;
-    if (h === "买入权重") th.title = "调仓日等权设定的买入权重；调仓间实际权重随价格自然漂移，调仓日（隔周五）拉回槽位等权";
+  var heads = liveHold
+    ? [["代码"], ["当前权重", "持仓市值 ÷ 账户净值（按最近收盘）；调仓间随价格漂移，调仓日拉回约 1/15"],
+       ["成本", "平均成本（含买入佣金，与 IB 的平均成本同口径）；日期 = 本轮首次买入日"],
+       ["现价（较成本）"], ["目标（剩余空间）"], ["推荐日"]]
+    : [["代码"], ["买入权重", "调仓日等权设定的买入权重；调仓间实际权重随价格自然漂移，调仓日（隔周五）拉回槽位等权"],
+       ["建仓"], ["现价（较建仓）"], ["目标（剩余空间）"], ["推荐日"]];
+  heads.forEach(function(h){
+    var th = document.createElement("th"); th.textContent = h[0];
+    if (h[1]) th.title = h[1];
     htr.appendChild(th);
   });
   thead.appendChild(htr); tb.appendChild(thead);
   var tbody = document.createElement("tbody");
-  (mp.holdings||[]).forEach(function(h){
+  (liveHold ? real.holdings : (mp.holdings||[])).forEach(function(h){
     var tr = document.createElement("tr");
     var td1 = document.createElement("td");
     var tk = document.createElement("span"); tk.className = "tk"; tk.textContent = h.ticker; td1.appendChild(tk);
@@ -870,7 +888,7 @@ function renderPortfolio(mp){
     tr.appendChild(td1);
     var td2 = document.createElement("td"); td2.className = "num"; td2.textContent = h.weight != null ? (h.weight*100).toFixed(1)+"%" : "—"; tr.appendChild(td2);
     var td3 = document.createElement("td"); td3.className = "num";
-    td3.textContent = fmtMoney(h.entry_px, h.currency);
+    td3.textContent = fmtMoney(liveHold ? h.avg_cost : h.entry_px, h.currency);
     if (h.entry_date){ var n3 = document.createElement("span"); n3.className = "nm"; n3.textContent = h.entry_date; td3.appendChild(n3); }
     tr.appendChild(td3);
     var td4 = document.createElement("td"); td4.className = "num";
